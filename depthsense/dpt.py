@@ -42,7 +42,8 @@ class DepthSense(nn.Module):
         }
 
         # DINOv2 ViT backbone
-        self.pretrained = DINOv2(model_name=encoder, device=device)
+        self.pretrained = DINOv2(model_name=encoder)
+        self.pretrained = self.pretrained.to(device)
 
         # Depth + normal dual-head decoder
         self.head = DepthSenseHead(
