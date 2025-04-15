@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import np, cv2
+import numpy as np
+import cv2
 
 crop_size_h = 481
 crop_size_w = 641

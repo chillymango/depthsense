@@ -4,10 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.transforms import Compose
 
-from .dinov2 import DINOv2
-from .util.transform import Resize, NormalizeImage, PrepareForNet
-from .depthsense_head import DepthSenseHead
-from .refinement import depth_to_normal, normal_to_depth, EdgeRefinement, DepthRefinement, NormalRefinement
+from dinov2 import DINOv2
+from util.transform import Resize, NormalizeImage, PrepareForNet
+from depthsense_head import DepthSenseHead
+from refinement import depth_to_normal, normal_to_depth, EdgeRefinement, DepthRefinement, NormalRefinement
+
 
 class DepthSense(nn.Module):
     """
@@ -54,9 +55,9 @@ class DepthSense(nn.Module):
         self.depth_refiner = DepthRefinement(batch_size=1)
         self.normal_refiner = NormalRefinement(batch_size=1)
 
-    def forward(self, x, intrinsics=None, grid=None, edge_refine=False):
+    def forward(self, x, edge_refine=False):
         # Compute patch size for reshaping ViT tokens into spatial maps
-        patch_h, patch_w = x.shape[-2] // 14, x.shape[-1] // 14
+        patch_h, patch_w = x.shape[-2] // 16, x.shape[-1] // 16
 
         # Extract ViT features from selected layers
         features = self.pretrained.get_intermediate_layers(
@@ -70,29 +71,6 @@ class DepthSense(nn.Module):
         depth = depth.squeeze(1) * self.max_depth
         normals = F.normalize(normals, p=2, dim=1)
 
-        if intrinsics is not None and grid is not None:
-            normals_from_d = depth_to_normal(depth.unsqueeze(1), intrinsics)
-            normals = F.normalize(normals + normals_from_d, dim=1)
-
-            depth_from_n = normal_to_depth(normals, intrinsics)
-
-            fc8_upsample_norm = normals.permute(0, 2, 3, 1)
-            fc8_upsample = depth.unsqueeze(-1)
-
-            depth = self.depth_refiner(
-                fc8_upsample=fc8_upsample,
-                fc8_upsample_norm=fc8_upsample_norm,
-                grid=grid,
-                inputs=x
-            ).squeeze(1) * self.max_depth
-
-            normals = self.normal_refiner(
-                fc8_upsample_norm=fc8_upsample_norm,
-                fc8_upsample=fc8_upsample,
-                grid=grid,
-                inputs=x
-            )
-
         if edge_refine:
             depth, normals = self.edge_refiner(x, depth.unsqueeze(1), normals)
             depth = depth.squeeze(1)
@@ -102,7 +80,7 @@ class DepthSense(nn.Module):
     @torch.no_grad()
     def infer_image(self, raw_image, input_size=518):
         # Preprocess image and predict depth + normals at original resolution
-        image, (h, w) = self.image2tensor(raw_image, input_size)
+        image, (h, w) = raw_image, raw_image.shape[:2]
         depth, normals = self.forward(image)
 
         depth = F.interpolate(depth[:, None], (h, w), mode="bilinear", align_corners=True)[0, 0]
@@ -117,7 +95,6 @@ class DepthSense(nn.Module):
                 height=input_size,
                 resize_target=False,
                 keep_aspect_ratio=True,
-                ensure_multiple_of=14,
                 resize_method='lower_bound',
                 image_interpolation_method=cv2.INTER_CUBIC,
             ),

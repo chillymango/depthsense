@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .util.blocks import FeatureFusionBlock, _make_scratch
+from util.blocks import FeatureFusionBlock, _make_scratch
 
 def _make_fusion_block(features, use_bn, size=None):
     # Helper function to instantiate a FeatureFusionBlock
@@ -113,10 +113,10 @@ class DepthSenseHead(nn.Module):
         path_1 = self.scratch.refinenet1(path_2, layer_1_rn)
 
         # Upsample and decode predictions
-        depth = F.interpolate(path_1, scale_factor=14, mode="bilinear", align_corners=True)
+        depth = F.interpolate(path_1, scale_factor=16, mode="bilinear", align_corners=True)
         depth = self.depth_head(depth)
 
-        normals = F.interpolate(path_1, scale_factor=14, mode="bilinear", align_corners=True)
+        normals = F.interpolate(path_1, scale_factor=16, mode="bilinear", align_corners=True)
         normals = self.normal_head(normals)
 
         return depth, normals
