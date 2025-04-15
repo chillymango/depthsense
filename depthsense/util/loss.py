@@ -10,9 +10,10 @@ class GeoNetLoss(nn.Module):
     GeoNet loss function.
     """
 
-    def __init__(self):
+    def __init__(self, ratio: float = 1.0):
         super().__init__()
         self.loss: Module = MSELoss()
+        self.ratio = ratio
 
     def forward(
         self,

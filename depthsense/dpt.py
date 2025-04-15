@@ -23,9 +23,11 @@ class DepthSense(nn.Module):
         out_channels=[256, 512, 1024, 1024],
         use_bn=False,
         use_clstoken=False,
-        max_depth=20.0
+        max_depth=20.0,
+        device="cpu",
     ):
         super().__init__()
+        self.device = device
 
         # Model parameters
         self.max_depth = max_depth
@@ -40,7 +42,7 @@ class DepthSense(nn.Module):
         }
 
         # DINOv2 ViT backbone
-        self.pretrained = DINOv2(model_name=encoder)
+        self.pretrained = DINOv2(model_name=encoder, device=device)
 
         # Depth + normal dual-head decoder
         self.head = DepthSenseHead(
@@ -48,7 +50,8 @@ class DepthSense(nn.Module):
             features=features,
             use_bn=use_bn,
             out_channels=out_channels,
-            use_clstoken=use_clstoken
+            use_clstoken=use_clstoken,
+            device=device,
         )
 
         self.edge_refiner = EdgeRefinement()
