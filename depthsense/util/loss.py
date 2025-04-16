@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torch.nn import CosineSimilarity
 from torch.nn import MSELoss
 from torch.nn import Module
 
@@ -17,7 +16,6 @@ class Loss(nn.Module):
     def __init__(self, depth_scale: float = 1.0, normal_scale: float = 1.0):
         super().__init__()
         self.loss: Module = MSELoss()
-        self.cs = CosineSimilarity(dim=0, eps=1e-6)
         self.ds = depth_scale
         self.ns = normal_scale
         self.log_sigma_d = nn.Parameter(torch.tensor(0.0))
@@ -34,8 +32,13 @@ class Loss(nn.Module):
 
     def normal_loss(self, n_hat: Tensor, n_gt: Tensor):
         # n_hat should already be normalized and n_gt should already be normalized
-        n_mask = ~torch.isnan(n_gt).any(dim=1, keepdim=True).expand_as(n_hat)
-        return 1 / (2 * torch.exp(self.log_sigma_n)) * (1 - self.cs(n_hat[n_mask], n_gt[n_mask])) + self.log_sigma_n / 2
+        n_hat_flat = n_hat.permute(0, 2, 3, 1).reshape(-1, 3)
+        n_gt_flat = n_gt.permute(0, 2, 3, 1).reshape(-1, 3)
+
+        n_mask = ~torch.isnan(n_gt_flat).any(dim=1)
+
+        cos_sim = F.cosine_similarity(n_hat_flat[n_mask], n_gt_flat[n_mask], dim=1)
+        return 1 / (2 * torch.exp(self.log_sigma_n)) * (1 - cos_sim).mean() + self.log_sigma_n / 2
 
     def forward(
         self,
