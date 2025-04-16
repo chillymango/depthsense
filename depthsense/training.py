@@ -72,7 +72,7 @@ if __name__ == "__main__":
     description: str = "DepthSense for Metric Depth and Normal Estimation"
     model_path: str = "models/teacher_{}.pth"
     
-    batch_size: int = 4
+    batch_size: int = 8
     betas: tuple[float, float] = 0.9, 0.999
     dataset_name: Dataset = "hypersim"
     decay: float = 1e-2
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     epochs: int = 20
     eps: float = 1e-8
     features: int = 128
-    lr: float = 1e-4
+    lr: float = 1e-3
     
     # Data splitting.
     dataset: Dataset = DepthSenseDataset(f"/data/{dataset_name}")
@@ -102,7 +102,8 @@ if __name__ == "__main__":
     model_name: str = model_path.replace("{}", dataset_name)
     model: DepthSense = DepthSense(encoder, features).to(device)
     criterion: Module = Loss()
-    optimizer: Optimizer = AdamW(model.parameters(), lr, betas, eps, decay)
+    params = [{"params": model.parameters()}, {"params": [criterion.log_sigma_d, criterion.log_sigma_n]}]
+    optimizer: Optimizer = AdamW(params, lr, betas, eps, decay)
 
     # Training.
     model.train()
@@ -157,6 +158,7 @@ if __name__ == "__main__":
                 avg_n_loss = rnl / (i + 1)
                 avg_d_loss = rdl / (i + 1)
                 print(f"Epoch {e}, iter {i + 1}/{max_iters} — Loss: {avg_loss:.4f}, Loss Norm: {avg_n_loss:.4f}, Loss Depth: {avg_d_loss:.4f}")
+                print(criterion.log_sigma_d.item(), criterion.log_sigma_n.item())
             
             allocated = torch.cuda.memory_allocated() / (1024 ** 3)
             peak = torch.cuda.max_memory_allocated() / (1024 ** 3)
