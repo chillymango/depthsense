@@ -1,5 +1,6 @@
 import cv2
 import os
+import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -17,7 +18,12 @@ from torch.utils.data import Dataset
 from dpt import DepthSense
 from util.loss import Loss
 
+random.seed(7643)
+np.random.seed(7643)
+torch.manual_seed(7643)
 torch.random.manual_seed(7643)
+torch.cuda.manual_seed(7643)
+
 
 class DepthSenseDataset(Dataset):
     """
@@ -45,8 +51,8 @@ class DepthSenseDataset(Dataset):
         return tensor
 
 
-    def __getitem__(self, i: int) -> tuple[Tensor, Tensor, Tensor]:
-        return self._read_array(i, "frame"), self._read_array(i, "depth"), self._read_array(i, "normal")
+    def __getitem__(self, i: int) -> tuple[int, Tensor, Tensor, Tensor]:
+        return i, self._read_array(i, "frame"), self._read_array(i, "depth"), self._read_array(i, "normal")
 
     def __len__(self) -> int:
         return len(self.directories)
@@ -100,13 +106,18 @@ if __name__ == "__main__":
         rl: float = 0.0
         rdl: float = 0.0
         rnl: float = 0.0
-        for i, (x, z_gt, n_gt) in enumerate(train_loader):
+        for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
             # debug by overfitting to one sample
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
 
             # Move to appropriate device.
             x = x.to(device).permute(0, 3, 1, 2)
+            # TODO: maybe something smarter for nan interpolation, but for now we just fill
+            if torch.isnan(x).sum() > 10000:
+                print(f"Warning: image {j} has {torch.isnan(x).sum()} nan")
+            x = torch.nan_to_num(x, 0.0)
+
             z_gt = z_gt.to(device)
             z_gt = torch.clamp(z_gt, min=0.0, max=80.0)
             n_gt = n_gt.to(device).permute(0, 3, 1, 2) # (B, H, W, C) → (B, C, H, W)
@@ -117,6 +128,8 @@ if __name__ == "__main__":
             # Forward pass.
             z_hat, n_hat = model(x)
             depth_loss, norm_loss = criterion(z_hat, z_gt, n_hat, n_gt)
+            if torch.isnan(depth_loss).any() or torch.isnan(norm_loss).any():
+                breakpoint()
             loss = depth_loss + norm_loss
             # Backward pass.
             optimizer.zero_grad()

@@ -18,6 +18,14 @@ class Loss(nn.Module):
         self.ds = depth_scale
         self.ns = normal_scale
 
+    def depth_loss(self, z_hat: Tensor, z_gt: Tensor):
+        z_mask = ~torch.isnan(z_gt)
+        return self.ds * self.loss(z_hat[z_mask], z_gt[z_mask])
+
+    def normal_loss(self, n_hat: Tensor, n_gt: Tensor):
+        n_mask = ~torch.isnan(n_gt)
+        return self.ns * self.loss(n_hat[n_mask], n_gt[n_mask])
+
     def forward(
         self,
         z_hat: Tensor,
@@ -25,9 +33,10 @@ class Loss(nn.Module):
         n_hat: Tensor,
         n_gt: Tensor,
     ) -> Tuple[Tensor, Tensor]:
-        z_mask = ~torch.isnan(z_hat) & ~torch.isnan(z_gt)
-        n_mask = ~torch.isnan(n_hat) & ~torch.isnan(n_gt)
-        # TODO: the below makes the loss way too high
-        # Coarse depth prediction was log-depth in TF, convert to linear
-        #z_gt[z_mask] = torch.pow(2.0, z_gt[z_mask])
-        return self.ds * self.loss(z_hat[z_mask], z_gt[z_mask]), self.ns * self.loss(n_hat[n_mask], n_gt[n_mask])
+        return self.depth_loss(z_hat, z_gt), self.normal_loss(n_hat, n_gt)
+        #z_mask = ~torch.isnan(z_hat) & ~torch.isnan(z_gt)
+        #n_mask = ~torch.isnan(n_hat) & ~torch.isnan(n_gt)
+        ## TODO: the below makes the loss way too high
+        ## Coarse depth prediction was log-depth in TF, convert to linear
+        ##z_gt[z_mask] = torch.pow(2.0, z_gt[z_mask])
+        #return self.ds * self.loss(z_hat[z_mask], z_gt[z_mask]), self.ns * self.loss(n_hat[n_mask], n_gt[n_mask])
