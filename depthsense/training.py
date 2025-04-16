@@ -8,12 +8,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.utils.data as data
+import torchvision
 from torch import Tensor
 from torch.nn import Module
 from torch.optim import AdamW
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+from torch.utils.tensorboard import SummaryWriter
 
 from dpt import DepthSense
 from util.loss import Loss
@@ -67,11 +69,37 @@ class DepthSenseDataset(Dataset):
         return len(self.directories)
 
 
+def visualize_normals(normals: torch.Tensor) -> torch.Tensor:
+    vis = (normals + 1.0) / 2.0
+    vis[~torch.isfinite(vis)] = 0.0
+    return vis.clamp(0, 1)
+
+
+
+def visualize_depth(depth: torch.Tensor) -> torch.Tensor:
+    depth_vis = []
+    for d in depth:
+        mask = torch.isfinite(d)
+        if mask.any():
+            d_clean = d.clone()
+            d_clean[~mask] = 0.0
+            d_min = d_clean[mask].min()
+            d_max = d_clean[mask].max()
+            norm = (d_clean - d_min) / (d_max - d_min + 1e-8)
+        else:
+            norm = torch.zeros_like(d)
+        depth_vis.append(norm.clamp(0, 1))
+    return torch.stack(depth_vis).unsqueeze(1)
+
+
+
 if __name__ == "__main__":
     # Parameters and hyperparameters used for training.
     description: str = "DepthSense for Metric Depth and Normal Estimation"
     model_path: str = "models/teacher_{}.pth"
     
+    writer = SummaryWriter(log_dir="runs/experiment_01")
+
     batch_size: int = 8
     betas: tuple[float, float] = 0.9, 0.999
     dataset_name: Dataset = "hypersim"
@@ -84,10 +112,10 @@ if __name__ == "__main__":
     )
     print(f"Using device {device}")
     encoder: str = "vits"
-    epochs: int = 20
+    epochs: int = 10
     eps: float = 1e-8
     features: int = 128
-    lr: float = 1e-3
+    lr: float = 2e-4
     
     # Data splitting.
     dataset: Dataset = DepthSenseDataset(f"/data/{dataset_name}")
@@ -105,6 +133,14 @@ if __name__ == "__main__":
     params = [{"params": model.parameters()}, {"params": [criterion.log_sigma_d, criterion.log_sigma_n]}]
     optimizer: Optimizer = AdamW(params, lr, betas, eps, decay)
 
+    checkpoint = None
+    start_epoch = 0
+    if checkpoint is not None:
+        checkpoint = torch.load(checkpoint)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+
     # Training.
     model.train()
     
@@ -113,7 +149,7 @@ if __name__ == "__main__":
     train_loader: DataLoader = DataLoader(train_set, batch_size, shuffle=shuffle)
     max_iters: int = len(train_loader)
 
-    for e in range(epochs):
+    for e in range(start_epoch, epochs):
         print(f"Epoch: {e}/{epochs}...")
         rl: float = 0.0
         rdl: float = 0.0
@@ -158,11 +194,37 @@ if __name__ == "__main__":
                 avg_n_loss = rnl / (i + 1)
                 avg_d_loss = rdl / (i + 1)
                 print(f"Epoch {e}, iter {i + 1}/{max_iters} — Loss: {avg_loss:.4f}, Loss Norm: {avg_n_loss:.4f}, Loss Depth: {avg_d_loss:.4f}")
-                print(criterion.log_sigma_d.item(), criterion.log_sigma_n.item())
-            
-            allocated = torch.cuda.memory_allocated() / (1024 ** 3)
-            peak = torch.cuda.max_memory_allocated() / (1024 ** 3)
-            #print(f"   [CUDA] allocated: {allocated:.2f} GB, peak: {peak:.2f} GB")
-            
+                writer.add_scalar("loss/normal", avg_n_loss, i)
+                writer.add_scalar("loss/depth", avg_d_loss, i)
+                writer.add_scalar("loss/total", avg_loss, i)
+                writer.add_scalar("param/log_sigma_d", criterion.log_sigma_d.item(), i)
+                writer.add_scalar("param/log_smg_an", criterion.log_sigma_n.item(), i)
+
+            if (i + 1) % 100 == 0 or i == 0:
+                # TODO: compute validation loss
+                # render label and prediction
+                n_pred_vis = visualize_normals(n_hat[:4])
+                n_gt_vis = visualize_normals(n_gt[:4])
+                z_pred_vis = visualize_depth(z_hat[:4])
+                z_gt_vis = visualize_depth(z_gt[:4])
+        
+                n_pred_grid = torchvision.utils.make_grid(n_pred_vis)
+                n_gt_grid = torchvision.utils.make_grid(n_gt_vis)
+                z_pred_grid = torchvision.utils.make_grid(z_pred_vis)
+                z_gt_grid = torchvision.utils.make_grid(z_gt_vis)
+        
+                writer.add_image("Normals/Prediction", n_pred_grid, i)
+                writer.add_image("Normals/GroundTruth", n_gt_grid, i)
+                writer.add_image("Depth/Prediction", z_pred_grid, i)
+                writer.add_image("Depth/GroundTruth", z_gt_grid, i)
+
+        print(f'Saving checkpoint for epoch {i}')
+        torch.save({
+            'epoch': e,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': loss,
+        }, f'checkpoint_epoch_{i}.pt')
+
     # Save current model.
     torch.save(model.state_dict(), model_name)
