@@ -49,6 +49,10 @@ class DepthSenseDataset(Dataset):
             array = np.nan_to_num(array, nan=0.0, posinf=1e4, neginf=0)
             array = np.clip(array, 0, 1e4)
             array = array / (1.0 + array)
+        # if reading depth map, clip to (0, 80)
+        elif name == "depth":
+            array = np.nan_to_num(array, nan=80.0, posinf=80.0, neginf=0.0)
+            array = np.clip(array, 0, 80.0)
 
         resized = cv2.resize(array, (array.shape[1] // 2, array.shape[0] // 2), interpolation=cv2.INTER_AREA)
 
@@ -122,10 +126,6 @@ if __name__ == "__main__":
 
             # Move to appropriate device.
             x = x.to(device).permute(0, 3, 1, 2)
-            # TODO: maybe something smarter for nan interpolation, but for now we just fill
-            if torch.isnan(x).sum() > 10000:
-                print(f"Warning: image {j} has {torch.isnan(x).sum()} nan")
-            x = torch.nan_to_num(x, 0.0)
 
             z_gt = z_gt.to(device)
             z_gt = torch.nan_to_num(z_gt, nan=80.0, posinf=80.0, neginf=0.0)
