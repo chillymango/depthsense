@@ -44,6 +44,12 @@ class DepthSenseDataset(Dataset):
         if array.ndim == 2:
             array = array[..., np.newaxis]
 
+        # if reading RGB frame image, apply simple tonemap
+        if name == "frame":
+            array = np.nan_to_num(array, nan=0.0, posinf=1e4, neginf=0)
+            array = np.clip(array, 0, 1e4)
+            array = array / (1.0 + array)
+
         resized = cv2.resize(array, (array.shape[1] // 2, array.shape[0] // 2), interpolation=cv2.INTER_AREA)
 
         tensor = torch.from_numpy(resized).float()
@@ -98,7 +104,9 @@ if __name__ == "__main__":
     # Training.
     model.train()
     
-    train_loader: DataLoader = DataLoader(train_set, batch_size, shuffle=True)
+    # DEBUGGING: DETERMINISTIC LOAD ORDER
+    shuffle = False
+    train_loader: DataLoader = DataLoader(train_set, batch_size, shuffle=shuffle)
     max_iters: int = len(train_loader)
 
     for e in range(epochs):
@@ -107,7 +115,6 @@ if __name__ == "__main__":
         rdl: float = 0.0
         rnl: float = 0.0
         for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
-            # debug by overfitting to one sample
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
 
@@ -119,6 +126,7 @@ if __name__ == "__main__":
             x = torch.nan_to_num(x, 0.0)
 
             z_gt = z_gt.to(device)
+            z_gt = torch.nan_to_num(z_gt, nan=80.0, posinf=80.0, neginf=0.0)
             z_gt = torch.clamp(z_gt, min=0.0, max=80.0)
             n_gt = n_gt.to(device).permute(0, 3, 1, 2) # (B, H, W, C) → (B, C, H, W)
         
@@ -129,7 +137,10 @@ if __name__ == "__main__":
             z_hat, n_hat = model(x)
             depth_loss, norm_loss = criterion(z_hat, z_gt, n_hat, n_gt)
             if torch.isnan(depth_loss).any() or torch.isnan(norm_loss).any():
+                print("Encountered nan in model output. Training will fail from here.")
                 breakpoint()
+                raise ValueError("nan in model output")
+
             loss = depth_loss + norm_loss
             # Backward pass.
             optimizer.zero_grad()
