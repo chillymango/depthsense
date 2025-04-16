@@ -7,7 +7,7 @@ from torchvision.transforms import Compose
 from dinov2 import DINOv2
 from util.transform import Resize, NormalizeImage, PrepareForNet
 from depthsense_head import DepthSenseHead
-from refinement import depth_to_normal, normal_to_depth, EdgeRefinement, DepthRefinement, NormalRefinement
+from dpt2 import DPTHead
 
 
 class DepthSense(nn.Module):
@@ -23,11 +23,9 @@ class DepthSense(nn.Module):
         out_channels=[256, 512, 1024, 1024],
         use_bn=False,
         use_clstoken=False,
-        max_depth=20.0,
-        device="cpu",
+        max_depth=80.0
     ):
         super().__init__()
-        self.device = device
 
         # Model parameters
         self.max_depth = max_depth
@@ -38,26 +36,27 @@ class DepthSense(nn.Module):
             'vits': [2, 5, 8, 11],
             'vitb': [2, 5, 8, 11],
             'vitl': [4, 11, 17, 23],
-            'vitg': [9, 19, 29, 39]
+            'vitg': [9, 19, 29, 39],
         }
 
         # DINOv2 ViT backbone
         self.pretrained = DINOv2(model_name=encoder)
-        self.pretrained = self.pretrained.to(device)
 
         # Depth + normal dual-head decoder
+        #self.head = DPTHead(
+        #    in_channels=self.pretrained.embed_dim,
+        #    features=features,
+        #    use_bn=use_bn,
+        #    out_channels=out_channels,
+        #    use_clstoken=use_clstoken,
+        #)
         self.head = DepthSenseHead(
             in_channels=self.pretrained.embed_dim,
             features=features,
             use_bn=use_bn,
             out_channels=out_channels,
             use_clstoken=use_clstoken,
-            device=device,
         )
-
-        self.edge_refiner = EdgeRefinement()
-        self.depth_refiner = DepthRefinement(batch_size=1)
-        self.normal_refiner = NormalRefinement(batch_size=1)
 
     def forward(self, x, edge_refine=False):
         # Compute patch size for reshaping ViT tokens into spatial maps
@@ -67,17 +66,13 @@ class DepthSense(nn.Module):
         features = self.pretrained.get_intermediate_layers(
             x,
             self.intermediate_layer_idx[self.encoder],
-            return_class_token=True
+            return_class_token=True,
         )
 
         # Predict raw depth and normal maps
         depth, normals = self.head(features, patch_h, patch_w)
         depth = depth.squeeze(1) * self.max_depth
         normals = F.normalize(normals, p=2, dim=1)
-
-        if edge_refine:
-            depth, normals = self.edge_refiner(x, depth.unsqueeze(1), normals)
-            depth = depth.squeeze(1)
 
         return depth, normals
 

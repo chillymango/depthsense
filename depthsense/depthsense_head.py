@@ -29,32 +29,30 @@ class DepthSenseHead(nn.Module):
         use_bn=False,
         out_channels=[256, 512, 1024, 1024],
         use_clstoken=False,
-        device="cpu",
     ):
-        super(DepthSenseHead, self).__init__()
-        self.device = device
+        super().__init__()
 
         self.use_clstoken = use_clstoken
 
         # Project tokens from ViT into CNN-compatible feature maps
         self.projects = nn.ModuleList([
-            nn.Conv2d(in_channels=in_channels, out_channels=out_ch, kernel_size=1, device=device)
+            nn.Conv2d(in_channels=in_channels, out_channels=out_ch, kernel_size=1)
             for out_ch in out_channels
         ])
 
         # Resize token features to spatial resolution
         self.resize_layers = nn.ModuleList([
-            nn.ConvTranspose2d(out_channels[0], out_channels[0], kernel_size=4, stride=4, device=device),
-            nn.ConvTranspose2d(out_channels[1], out_channels[1], kernel_size=2, stride=2, device=device),
+            nn.ConvTranspose2d(out_channels[0], out_channels[0], kernel_size=4, stride=4),
+            nn.ConvTranspose2d(out_channels[1], out_channels[1], kernel_size=2, stride=2),
             nn.Identity(),
-            nn.Conv2d(out_channels[3], out_channels[3], kernel_size=3, stride=2, padding=1, device=device)
+            nn.Conv2d(out_channels[3], out_channels[3], kernel_size=3, stride=2, padding=1)
         ])
 
         if use_clstoken:
             # Optional readout projection when using CLS token from ViT
             self.readout_projects = nn.ModuleList([
                 nn.Sequential(
-                    nn.Linear(2 * in_channels, in_channels, device=device,),
+                    nn.Linear(2 * in_channels, in_channels),
                     nn.GELU()
                 ) for _ in self.projects
             ])
@@ -68,11 +66,11 @@ class DepthSenseHead(nn.Module):
 
         # Depth decoder head (1-channel)
         self.depth_head = nn.Sequential(
-            nn.Conv2d(features, features // 2, kernel_size=3, padding=1, device=device),
+            nn.Conv2d(features, features // 2, kernel_size=3, padding=1),
             nn.ReLU(True),
-            nn.Conv2d(features // 2, 32, kernel_size=3, padding=1, device=device),
+            nn.Conv2d(features // 2, 32, kernel_size=3, padding=1),
             nn.ReLU(True),
-            nn.Conv2d(32, 1, kernel_size=1, device=device),
+            nn.Conv2d(32, 1, kernel_size=1),
             nn.Sigmoid()
         )
 
@@ -114,11 +112,20 @@ class DepthSenseHead(nn.Module):
         path_2 = self.scratch.refinenet2(path_3, layer_2_rn, size=layer_1_rn.shape[2:])
         path_1 = self.scratch.refinenet1(path_2, layer_1_rn)
 
-        # Upsample and decode predictions
-        depth = F.interpolate(path_1, scale_factor=16, mode="bilinear", align_corners=True)
-        depth = self.depth_head(depth)
+        # print(f"[DepthSenseHead.forward] path_1 shape: {path_1.shape}")
 
-        normals = F.interpolate(path_1, scale_factor=16, mode="bilinear", align_corners=True)
-        normals = self.normal_head(normals)
+        # Upsample and decode predictions
+        target_h = patch_h * 16
+        target_w = patch_w * 16
+
+        depth = self.depth_head(path_1)                      # shape: (B, 1, H/16, W/16)
+        # print(f"depth (pre-upsample) shape: {depth.shape}")
+        depth = F.interpolate(depth, size=(target_h, target_w), mode="bilinear", align_corners=True)
+        # print(f"depth (final) shape: {depth.shape}")
+
+        normals = self.normal_head(path_1)                   # shape: (B, 3, H/16, W/16)
+        # print(f"normals (pre-upsample) shape: {normals.shape}")
+        normals = F.interpolate(normals, size=(target_h, target_w), mode="bilinear", align_corners=True)
+        # print(f"normals (final) shape: {normals.shape}")
 
         return depth, normals
