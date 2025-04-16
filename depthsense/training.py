@@ -60,7 +60,6 @@ class DepthSenseDataset(Dataset):
 
         return tensor
 
-
     def __getitem__(self, i: int) -> tuple[int, Tensor, Tensor, Tensor]:
         return i, self._read_array(i, "frame"), self._read_array(i, "depth"), self._read_array(i, "normal")
 
@@ -88,7 +87,7 @@ if __name__ == "__main__":
     epochs: int = 20
     eps: float = 1e-8
     features: int = 128
-    lr: float = 1e-5
+    lr: float = 1e-4
     
     # Data splitting.
     dataset: Dataset = DepthSenseDataset(f"/data/{dataset_name}")
@@ -119,8 +118,8 @@ if __name__ == "__main__":
         rdl: float = 0.0
         rnl: float = 0.0
         for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
-            if i == 0:
-                continue
+            # DEBUG: overtrain on single sample
+
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
 

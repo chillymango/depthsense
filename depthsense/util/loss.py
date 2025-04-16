@@ -20,6 +20,8 @@ class Loss(nn.Module):
         self.cs = CosineSimilarity(dim=0, eps=1e-6)
         self.ds = depth_scale
         self.ns = normal_scale
+        self.log_sigma_d = nn.Parameter(torch.tensor(0.0))
+        self.log_sigma_n = nn.Parameter(torch.tensor(0.0))
 
     def depth_loss(self, z_hat: Tensor, z_gt: Tensor):
         ## TODO: the below makes the loss way too high
@@ -28,12 +30,12 @@ class Loss(nn.Module):
         z_mask = ~torch.isnan(z_gt)
         z_hat_mask = z_hat[z_mask]
         z_gt_mask = z_gt[z_mask]
-        return self.ds * self.loss(z_hat_mask / z_hat_mask.mean(), z_gt_mask / z_gt_mask.mean())
+        return 1 / (2 * torch.exp(self.log_sigma_d)) * self.loss(z_hat_mask / z_hat_mask.mean(), z_gt_mask / z_gt_mask.mean()) + self.log_sigma_d / 2
 
     def normal_loss(self, n_hat: Tensor, n_gt: Tensor):
         # n_hat should already be normalized and n_gt should already be normalized
         n_mask = ~torch.isnan(n_gt).any(dim=1, keepdim=True).expand_as(n_hat)
-        return 1 - self.cs(n_hat[n_mask], n_gt[n_mask])
+        return 1 / (2 * torch.exp(self.log_sigma_n)) * (1 - self.cs(n_hat[n_mask], n_gt[n_mask])) + self.log_sigma_n / 2
 
     def forward(
         self,
