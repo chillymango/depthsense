@@ -81,10 +81,10 @@ if __name__ == "__main__":
     )
     print(f"Using device {device}")
     encoder: str = "vits"
-    epochs: int = 10
+    epochs: int = 20
     eps: float = 1e-8
     features: int = 128
-    lr: float = 1e-4
+    lr: float = 1e-5
     
     # Data splitting.
     dataset: Dataset = DepthSenseDataset(f"/data/{dataset_name}")
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     # Model initialization.
     model_name: str = model_path.replace("{}", dataset_name)
     model: DepthSense = DepthSense(encoder, features).to(device)
-    criterion: Module = Loss(depth_scale=0.03)
+    criterion: Module = Loss()
     optimizer: Optimizer = AdamW(model.parameters(), lr, betas, eps, decay)
 
     # Training.
@@ -115,6 +115,8 @@ if __name__ == "__main__":
         rdl: float = 0.0
         rnl: float = 0.0
         for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
+            if i == 0:
+                continue
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
 
@@ -129,7 +131,7 @@ if __name__ == "__main__":
             z_gt = torch.nan_to_num(z_gt, nan=80.0, posinf=80.0, neginf=0.0)
             z_gt = torch.clamp(z_gt, min=0.0, max=80.0)
             n_gt = n_gt.to(device).permute(0, 3, 1, 2) # (B, H, W, C) → (B, C, H, W)
-        
+
             # TODO: see if we can autocast for memory improvement?
             #with torch.autocast(device_type=device, dtype=torch.bfloat16):
 
@@ -151,7 +153,7 @@ if __name__ == "__main__":
             rl += loss.item()
             rnl += norm_loss.item()
             rdl += depth_loss.item()
-            if (i + 1) % 50 == 0 or i == 0:
+            if (i + 1) % 10 == 0 or i == 0:
                 avg_loss = rl / (i + 1)
                 avg_n_loss = rnl / (i + 1)
                 avg_d_loss = rdl / (i + 1)

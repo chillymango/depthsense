@@ -71,7 +71,9 @@ class DepthSense(nn.Module):
         # Predict raw depth and normal maps
         depth, normals = self.head(features, patch_h, patch_w)
         depth = depth.squeeze(1) * self.max_depth
-        normals = F.normalize(normals, p=2, dim=1)
+
+        norm = torch.norm(normals, dim=1, p=2, keepdim=True).clamp(min=1e-6)
+        normals = normals / norm
 
         return depth, normals
 
