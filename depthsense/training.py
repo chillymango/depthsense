@@ -12,6 +12,7 @@ from torch.optim import AdamW
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+from torch.utils.data import Subset
 from torch.utils.tensorboard import SummaryWriter
 
 from dpt import DepthSense
@@ -20,6 +21,8 @@ from util.loss import Loss
 
 
 common.set_random_seeds()
+
+PRETRAINING = False
 
 
 class DepthSenseDataset(Dataset):
@@ -94,9 +97,8 @@ if __name__ == "__main__":
     description: str = "DepthSense for Metric Depth and Normal Estimation"
     model_path: str = "models/teacher_{}.pth"
 
-    writer = SummaryWriter(log_dir="runs/experiment_01")
+    writer = SummaryWriter(log_dir="runs/experiment_03")
 
-    batch_size: int = 128
     betas: tuple[float, float] = 0.9, 0.999
     dataset_name: Dataset = "hypersim"
     decay: float = 5e-2
@@ -107,11 +109,6 @@ if __name__ == "__main__":
         else "cpu"
     )
     print(f"Using device {device}")
-    encoder: str = "vits"
-    epochs: int = 50
-    eps: float = 1e-8
-    features: int = 128
-    lr: float = 3e-5
 
     # Data splitting.
     dataset: Dataset = DepthSenseDataset(f"/data/{dataset_name}")
@@ -119,35 +116,71 @@ if __name__ == "__main__":
     train_size: int = int(0.8 * data_size)
     val_size: int = int(0.1 * data_size)
     test_size: int = len(dataset) - train_size - val_size
-    train_set, val_set, test_set = data.random_split(dataset, [train_size, val_size, test_size])
+    
+    # Reduce boundary mixing of scenes by loading sequentially
+    all_indices = list(range(data_size))
+    train_indices = all_indices[:train_size]
+    val_indices = all_indices[train_size:train_size + val_size]
+    test_indices = all_indices[train_size + val_size:]
+
+    train_set = Subset(dataset, train_indices)
+    val_set = Subset(dataset, val_indices)
+    test_set = Subset(dataset, test_indices)
     print(f"data_size: {data_size}, train_size: {train_size}, val_size: {val_size}, test_size: {test_size}")
 
-    # Model initialization.
-    model_name: str = model_path.replace("{}", dataset_name)
-    model: DepthSense = DepthSense(encoder, features).to(device).to(memory_format=torch.channels_last)
-    # load pretrained weights
-    # TODO: look into using registers
-    #pretrained = torch.load('dinov2_vits14_reg4_pretrain.pth')
-    pretrained = torch.load('dinov2_vits14_pretrain.pth')
-    model.pretrained.load_state_dict(pretrained)
-    criterion: Module = Loss(normal_scale=5.0)
-    params = [{"params": model.parameters()},
-              {"params": [criterion.log_sigma_d, criterion.log_sigma_n]}]
-    optimizer: Optimizer = AdamW(params, lr, betas, eps, decay)
+    encoder: str = "vitg"
+    criterion: Module = Loss()
+    if PRETRAINING:
+        print(f"Pretraining, freezing backbone")
+        epochs: int = 3
+        batch_size: int = 128
+        eps: float = 1e-8
+        features: int = 128
+        lr: float = 1e-4
 
-    checkpoint = None
-    start_epoch = 0
-    if checkpoint is not None:
-        checkpoint = torch.load(checkpoint)
+        # Model initialization.
+        model_name: str = model_path.replace("{}", dataset_name)
+        model: DepthSense = DepthSense(encoder, features).to(device).to(memory_format=torch.channels_last)
+        # TODO: look into using registers
+        #pretrained = torch.load('dinov2_vits14_reg4_pretrain.pth')
+
+        # load pretrained weights
+        #pretrained = torch.load('dinov2_vitg14_pretrain.pth')
+        #model.pretrained.load_state_dict(pretrained)
+        
+        # load previous checkpoint for another few epochs
+        checkpoint = torch.load('checkpoint_epoch_1.pt')
         model.load_state_dict(checkpoint['model_state_dict'])
+
+        for param in model.pretrained.parameters():
+            param.requires_grad = False
+
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        optimizer: Optimizer = AdamW(trainable_params, lr, betas, eps, decay)
+
+        # load previous checkpoint
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch'] + 1
+    else:
+        print(f"Fine tuning")
+        epochs: int = 30
+        batch_size: int = 64
+        eps: float = 1e-8
+        features: int = 128
+        lr: float = 1e-6
+
+        # Model initialization.
+        model_name: str = model_path.replace("{}", dataset_name)
+        model: DepthSense = DepthSense(encoder, features).to(device).to(memory_format=torch.channels_last)
+        pretrain = torch.load('vitg-fine-tune-base.pth')
+        model.load_state_dict(pretrain)
+        params = [{"params": model.parameters()},
+                {"params": [criterion.log_sigma_d, criterion.log_sigma_n]}]
+        optimizer: Optimizer = AdamW(params, lr, betas, eps, decay)
 
     # Training.
     model.train()
 
-    # DEBUGGING: DETERMINISTIC LOAD ORDER
-    shuffle = False
+    shuffle = True
     train_loader: DataLoader = DataLoader(
         train_set,
         batch_size,
@@ -171,10 +204,11 @@ if __name__ == "__main__":
             torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA,
         ],
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('./runs/experiment_01')
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('./runs/experiment_03')
     ) as prof:
 
-        for e in range(start_epoch, epochs):
+        t = 0
+        for e in range(epochs):
             print(f"Epoch: {e}/{epochs}...")
             model.train()
 
@@ -215,16 +249,22 @@ if __name__ == "__main__":
                 rl += loss.item()
                 rnl += norm_loss.item()
                 rdl += depth_loss.item()
+                t += 1
                 if (i + 1) % 10 == 0 or i == 0:
-                    avg_loss = rl / (i + 1)
-                    avg_n_loss = rnl / (i + 1)
-                    avg_d_loss = rdl / (i + 1)
+                    avg_loss = rl / (10 if i > 0 else 1)
+                    avg_n_loss = rnl / (10 if i > 0 else 1)
+                    avg_d_loss = rdl / (10 if i > 0 else 1)
                     print(f"Epoch {e}, iter {i + 1}/{max_iters} — Loss: {avg_loss:.4f}, Loss Norm: {avg_n_loss:.4f}, Loss Depth: {avg_d_loss:.4f}")
-                    writer.add_scalar("loss/normal", avg_n_loss, i)
-                    writer.add_scalar("loss/depth", avg_d_loss, i)
-                    writer.add_scalar("loss/total", avg_loss, i)
-                    writer.add_scalar("param/log_sigma_d", criterion.log_sigma_d.item(), i)
-                    writer.add_scalar("param/log_sigma_n", criterion.log_sigma_n.item(), i)
+                    writer.add_scalar("loss/normal", avg_n_loss, t)
+                    writer.add_scalar("loss/depth", avg_d_loss, t)
+                    writer.add_scalar("loss/total", avg_loss, t)
+                    writer.add_scalar("param/log_sigma_d", criterion.log_sigma_d.item(), t)
+                    writer.add_scalar("param/log_sigma_n", criterion.log_sigma_n.item(), t)
+
+                    # reset running counters, don't aggregate over entire epoch
+                    rl = 0.0
+                    rnl = 0.0
+                    rdl = 0.0
 
                 if (i + 1) % 50 == 0 or i == 0:
                     # render label and prediction
@@ -238,17 +278,21 @@ if __name__ == "__main__":
                     z_pred_grid = torchvision.utils.make_grid(z_pred_vis)
                     z_gt_grid = torchvision.utils.make_grid(z_gt_vis)
 
-                    writer.add_image("Normals/Prediction", n_pred_grid, i)
-                    writer.add_image("Normals/GroundTruth", n_gt_grid, i)
-                    writer.add_image("Depth/Prediction", z_pred_grid, i)
-                    writer.add_image("Depth/GroundTruth", z_gt_grid, i)
+                    writer.add_image("Normals/Prediction", n_pred_grid, t)
+                    writer.add_image("Normals/GroundTruth", n_gt_grid, t)
+                    writer.add_image("Depth/Prediction", z_pred_grid, t)
+                    writer.add_image("Depth/GroundTruth", z_gt_grid, t)
 
             model.eval()
             val_rl = 0
             val_rdl = 0
             val_rnl = 0
             with torch.no_grad():
+                count = 0
                 for j, (idx, x_val, z_gt_val, n_gt_val) in enumerate(val_loader):
+                    count += 1
+                    if count > 100:
+                        break
                     x_val = x_val.to(device).permute(0, 3, 1, 2)
                     z_gt_val = torch.nan_to_num(
                         z_gt_val.to(device), nan=20.0, posinf=20.0, neginf=0.0
@@ -262,7 +306,7 @@ if __name__ == "__main__":
                     val_rdl += d_loss.item()
                     val_rnl += n_loss.item()
 
-            num_batches = len(val_loader)
+            num_batches = count
             avg_val = val_rl / num_batches
             avg_val_d = val_rdl / num_batches
             avg_val_n = val_rnl / num_batches
@@ -297,4 +341,9 @@ if __name__ == "__main__":
             }, f'checkpoint_epoch_{e}.pt')
 
     # Save current model.
-    torch.save(model.state_dict(), model_name)
+    if PRETRAINING:
+        print(f"Saving pretrained decoder-only to `pretrain.pth`, rename to `fine-tune-base.pth` to use")
+        torch.save(model.state_dict(), "pretrain.pth")
+    else:
+        print(f"Saving final model")
+        torch.save(model.state_dict(), f"{model_name}.pth")
