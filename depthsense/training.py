@@ -48,8 +48,8 @@ class DepthSenseDataset(Dataset):
             array = array / (1.0 + array)
         # if reading depth map, clip to (0, 80)
         elif name == "depth":
-            array = np.nan_to_num(array, nan=80.0, posinf=80.0, neginf=0.0)
-            array = np.clip(array, 0, 80.0)
+            array = np.nan_to_num(array, nan=20.0, posinf=20.0, neginf=0.0)
+            array = np.clip(array, 0, 20.0)
 
         # needs to be divisible by 14
         resized = cv2.resize(array, (252, 196), interpolation=cv2.INTER_AREA)
@@ -111,10 +111,10 @@ if __name__ == "__main__":
     epochs: int = 50
     eps: float = 1e-8
     features: int = 128
-    lr: float = 1e-5
+    lr: float = 3e-5
 
     # Data splitting.
-    dataset: Dataset = DepthSenseDataset(f"data/{dataset_name}")
+    dataset: Dataset = DepthSenseDataset(f"/data/{dataset_name}")
     data_size: int = len(dataset)
     train_size: int = int(0.8 * data_size)
     val_size: int = int(0.1 * data_size)
@@ -130,7 +130,7 @@ if __name__ == "__main__":
     #pretrained = torch.load('dinov2_vits14_reg4_pretrain.pth')
     pretrained = torch.load('dinov2_vits14_pretrain.pth')
     model.pretrained.load_state_dict(pretrained)
-    criterion: Module = Loss()
+    criterion: Module = Loss(normal_scale=5.0)
     params = [{"params": model.parameters()},
               {"params": [criterion.log_sigma_d, criterion.log_sigma_n]}]
     optimizer: Optimizer = AdamW(params, lr, betas, eps, decay)
@@ -148,36 +148,57 @@ if __name__ == "__main__":
 
     # DEBUGGING: DETERMINISTIC LOAD ORDER
     shuffle = False
-    train_loader: DataLoader = DataLoader(train_set, batch_size, shuffle=shuffle, pin_memory=True, num_workers=8, prefetch_factor=4)
+    train_loader: DataLoader = DataLoader(
+        train_set,
+        batch_size,
+        shuffle=shuffle,
+        pin_memory=True,
+        num_workers=8,
+        prefetch_factor=4,
+    )
+    val_loader: DataLoader = DataLoader(
+        val_set,
+        batch_size,
+        shuffle=shuffle,
+        pin_memory=True,
+        num_workers=8,
+        prefetch_factor=4
+    )
     max_iters: int = len(train_loader)
 
-    for e in range(start_epoch, epochs):
-        print(f"Epoch: {e}/{epochs}...")
-        rl: float = 0.0
-        rdl: float = 0.0
-        rnl: float = 0.0
-        for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
-            torch.cuda.empty_cache()
-            #torch.cuda.reset_peak_memory_stats()
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('./runs/experiment_01')
+    ) as prof:
 
-            # Move to appropriate device.
-            x = x.to(device).permute(0, 3, 1, 2)
+        for e in range(start_epoch, epochs):
+            print(f"Epoch: {e}/{epochs}...")
+            model.train()
 
-            z_gt = z_gt.to(device)
-            z_gt = torch.nan_to_num(z_gt, nan=80.0, posinf=80.0, neginf=0.0)
-            z_gt = torch.clamp(z_gt, min=0.0, max=80.0)
-            n_gt = n_gt.to(device).permute(
-                0,
-                3,
-                1,
-                2)  # (B, H, W, C) → (B, C, H, W)
+            rl: float = 0.0
+            rdl: float = 0.0
+            rnl: float = 0.0
+            for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
+                torch.cuda.empty_cache()
 
-            # DEBUG: overtrain on single sample
-            while True:
+                # Move to appropriate device.
+                x = x.to(device).permute(0, 3, 1, 2)
+
+                z_gt = z_gt.to(device)
+                z_gt = torch.nan_to_num(z_gt, nan=20.0, posinf=20.0, neginf=0.0)
+                z_gt = torch.clamp(z_gt, min=0.0, max=20.0)
+                n_gt = n_gt.to(device).permute(
+                    0,
+                    3,
+                    1,
+                    2)  # (B, H, W, C) → (B, C, H, W)
+
                 # Forward pass.
-                #with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                #    z_hat, n_hat = model(x)
-                z_hat, n_hat = model(x)
+                with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                    z_hat, n_hat = model(x)
                 depth_loss, norm_loss = criterion(z_hat, z_gt, n_hat, n_gt)
                 if torch.isnan(depth_loss).any() or torch.isnan(norm_loss).any():
                     print("Encountered nan in model output. Training will fail from here.")
@@ -205,8 +226,7 @@ if __name__ == "__main__":
                     writer.add_scalar("param/log_sigma_d", criterion.log_sigma_d.item(), i)
                     writer.add_scalar("param/log_sigma_n", criterion.log_sigma_n.item(), i)
 
-                if (i + 1) % 100 == 0 or i == 0:
-                    # TODO: compute validation loss
+                if (i + 1) % 50 == 0 or i == 0:
                     # render label and prediction
                     n_pred_vis = visualize_normals(n_hat[:4])
                     n_gt_vis = visualize_normals(n_gt[:4])
@@ -223,17 +243,58 @@ if __name__ == "__main__":
                     writer.add_image("Depth/Prediction", z_pred_grid, i)
                     writer.add_image("Depth/GroundTruth", z_gt_grid, i)
 
-                # if we're not doing debugging, break here
-                if True:
-                    break
-                i += 1
+            model.eval()
+            val_rl = 0
+            val_rdl = 0
+            val_rnl = 0
+            with torch.no_grad():
+                for j, (idx, x_val, z_gt_val, n_gt_val) in enumerate(val_loader):
+                    x_val = x_val.to(device).permute(0, 3, 1, 2)
+                    z_gt_val = torch.nan_to_num(
+                        z_gt_val.to(device), nan=20.0, posinf=20.0, neginf=0.0
+                    ).clamp(0, 20.0)
+                    n_gt_val = n_gt_val.to(device).permute(0, 3, 1, 2)
 
-        print(f'Saving checkpoint for epoch {e}')
-        torch.save({
-            'epoch': e,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-        }, f'checkpoint_epoch_{e}.pt')
+                    z_hat_val, n_hat_val = model(x_val)
+                    d_loss, n_loss = criterion(z_hat_val, z_gt_val, n_hat_val, n_gt_val)
+                    total_val = d_loss + n_loss
+                    val_rl += total_val.item()
+                    val_rdl += d_loss.item()
+                    val_rnl += n_loss.item()
+
+            num_batches = len(val_loader)
+            avg_val = val_rl / num_batches
+            avg_val_d = val_rdl / num_batches
+            avg_val_n = val_rnl / num_batches
+            print(
+                f"Validation — Loss: {avg_val:.4f}, Depth: {avg_val_d:.4f}, Norm: {avg_val_n:.4f}"
+            )
+            writer.add_scalar("val/total", avg_val, e)
+            writer.add_scalar("val/depth", avg_val_d, e)
+            writer.add_scalar("val/normal", avg_val_n, e)
+
+            # render the most recent
+            n_pred_vis = visualize_normals(n_hat_val[:4])
+            n_gt_vis = visualize_normals(n_gt_val[:4])
+            z_pred_vis = visualize_depth(z_hat_val[:4])
+            z_gt_vis = visualize_depth(z_gt_val[:4])
+
+            n_pred_grid = torchvision.utils.make_grid(n_pred_vis)
+            n_gt_grid = torchvision.utils.make_grid(n_gt_vis)
+            z_pred_grid = torchvision.utils.make_grid(z_pred_vis)
+            z_gt_grid = torchvision.utils.make_grid(z_gt_vis)
+
+            writer.add_image("Validation Normals/Prediction", n_pred_grid, e)
+            writer.add_image("Validation Normals/GroundTruth", n_gt_grid, e)
+            writer.add_image("Validation Depth/Prediction", z_pred_grid, e)
+            writer.add_image("Validation Depth/GroundTruth", z_gt_grid, e)
+
+            print(f'Saving checkpoint for epoch {e}')
+            torch.save({
+                'epoch': e,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+            }, f'checkpoint_epoch_{e}.pt')
 
     # Save current model.
     torch.save(model.state_dict(), model_name)
