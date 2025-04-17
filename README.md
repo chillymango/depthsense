@@ -7,7 +7,7 @@ CS7643 DL Final Project (2025-Spring)
 ### Installation (Google Collab + Google Drive)
 1. Clone this repository in Google Drive (Locally synced)
 ```
-git clone https://github.gatech.edu/cs7643-depthsense/depthsense.git
+git clone https://github.com/chillymango/depthsense.git
 cd depthsense
 pip install -r requirements.txt
 ```
@@ -16,12 +16,11 @@ pip install -r requirements.txt
 git submodule init
 git submodule update
 ```
-3. Check DEV environment by running notebooks/dethanythingv2-test.ipynb
+3. Check DEV environment by running ``depthanythingv2-test.ipynb``
 
 ## Project Structure
 ```
 depthsense/
-├── dinov2.py            # DINOv2 backbone wrapper
 ├── dinov2_layers/       # ViT model building blocks (unchanged from Depth-Anything-V2)
 │   ├── attention.py
 │   ├── block.py
@@ -31,13 +30,16 @@ depthsense/
 │   ├── patch_embed.py
 │   ├── swiglu_ffn.py
 │   └── __init__.py
-├── dpt.py                # Contains the DepthSense model class
-├── depthsense_head.py    # Dual-head decoder for depth and normals
-├── geonet-code-map.py    # Explain how GeoNet's code.py is mapped to DepthSense
-├── refinement.py         # Implements normal-to-detph(N2D), D2N, and edge propagation
+├── depthsense_head.py         # Dual-head decoder for depth and normals
+├── dinov2.py                  # DINOv2 backbone wrapper
+├── dpt.py                     # Contains the DepthSense model class
+├── generate_pseudo_labels.py  # Creates pseudo-labels for student model's training data
+├── geonet-code-map.py         # Explain how GeoNet's code.py is mapped to DepthSense
+├── training.py                # Configurable training script for teacher / student models
 ├── util/
-│   ├── blocks.py         # Feature fusion utilities
-│   └── transform.py      # Image preprocessing transforms
+│   ├── blocks.py              # Feature fusion utilities
+│   ├── loss.py                # Loss function
+│   └── transform.py           # Image preprocessing transforms
 ```
 
 ## LICENSE

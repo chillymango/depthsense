@@ -7,7 +7,6 @@ from torchvision.transforms import Compose
 from dinov2 import DINOv2
 from util.transform import Resize, NormalizeImage, PrepareForNet
 from depthsense_head import DepthSenseHead
-from dpt2 import DPTHead
 
 
 class DepthSense(nn.Module):
@@ -80,13 +79,13 @@ class DepthSense(nn.Module):
     @torch.no_grad()
     def infer_image(self, raw_image, input_size=518):
         # Preprocess image and predict depth + normals at original resolution
-        image, (h, w) = raw_image, raw_image.shape[:2]
+        image, (h, w) = raw_image, raw_image.shape[2:]
         depth, normals = self.forward(image)
 
-        depth = F.interpolate(depth[:, None], (h, w), mode="bilinear", align_corners=True)[0, 0]
-        normals = F.interpolate(normals, (h, w), mode="bilinear", align_corners=True)[0]
+        depth = F.interpolate(depth[:, None], (h, w), mode="bilinear", align_corners=True)
+        normals = F.interpolate(normals, (h, w), mode="bilinear", align_corners=True)
 
-        return depth.cpu().numpy(), normals.cpu().numpy()
+        return depth, normals
 
     def image2tensor(self, raw_image, input_size=518):
         transform = Compose([
