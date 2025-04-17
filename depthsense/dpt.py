@@ -60,7 +60,7 @@ class DepthSense(nn.Module):
 
     def forward(self, x, edge_refine=False):
         # Compute patch size for reshaping ViT tokens into spatial maps
-        patch_h, patch_w = x.shape[-2] // 16, x.shape[-1] // 16
+        patch_h, patch_w = x.shape[-2] // 14, x.shape[-1] // 14
         # Extract ViT features from selected layers
         features = self.pretrained.get_intermediate_layers(
             x,

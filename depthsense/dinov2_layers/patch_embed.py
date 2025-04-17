@@ -38,7 +38,7 @@ class PatchEmbed(nn.Module):
     def __init__(
         self,
         img_size: Union[int, Tuple[int, int]] = 224,
-        patch_size: Union[int, Tuple[int, int]] = 16,
+        patch_size: Union[int, Tuple[int, int]] = 14,
         in_chans: int = 3,
         embed_dim: int = 768,
         norm_layer: Optional[Callable] = None,

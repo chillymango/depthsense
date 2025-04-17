@@ -115,8 +115,8 @@ class DepthSenseHead(nn.Module):
         # print(f"[DepthSenseHead.forward] path_1 shape: {path_1.shape}")
 
         # Upsample and decode predictions
-        target_h = patch_h * 16
-        target_w = patch_w * 16
+        target_h = patch_h * 14
+        target_w = patch_w * 14
 
         depth = self.depth_head(path_1)                      # shape: (B, 1, H/16, W/16)
         # print(f"depth (pre-upsample) shape: {depth.shape}")
