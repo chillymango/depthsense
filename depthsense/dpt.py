@@ -42,13 +42,6 @@ class DepthSense(nn.Module):
         self.pretrained = DINOv2(model_name=encoder)
 
         # Depth + normal dual-head decoder
-        #self.head = DPTHead(
-        #    in_channels=self.pretrained.embed_dim,
-        #    features=features,
-        #    use_bn=use_bn,
-        #    out_channels=out_channels,
-        #    use_clstoken=use_clstoken,
-        #)
         self.head = DepthSenseHead(
             in_channels=self.pretrained.embed_dim,
             features=features,

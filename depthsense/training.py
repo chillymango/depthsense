@@ -116,8 +116,8 @@ if __name__ == "__main__":
     # Data splitting.
     dataset: Dataset = DepthSenseDataset(f"data/{dataset_name}")
     data_size: int = len(dataset)
-    train_size: int = 1#int(0.8 * data_size)
-    val_size: int = 0#int(0.2 * data_size)
+    train_size: int = int(0.8 * data_size)
+    val_size: int = int(0.1 * data_size)
     test_size: int = len(dataset) - train_size - val_size
     train_set, val_set, test_set = data.random_split(dataset, [train_size, val_size, test_size])
     print(f"data_size: {data_size}, train_size: {train_size}, val_size: {val_size}, test_size: {test_size}")
