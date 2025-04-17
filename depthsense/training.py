@@ -1,13 +1,9 @@
 import cv2
-import math
-import os
-import random
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import cv2
 import numpy as np
 import torch
-import torch.nn.functional as F
 import torch.utils.data as data
 import torchvision
 from torch import Tensor
@@ -19,13 +15,11 @@ from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 
 from dpt import DepthSense
+from util import common
 from util.loss import Loss
 
-random.seed(7643)
-np.random.seed(7643)
-torch.manual_seed(7643)
-torch.random.manual_seed(7643)
-torch.cuda.manual_seed(7643)
+
+common.set_random_seeds()
 
 
 class DepthSenseDataset(Dataset):
@@ -65,7 +59,9 @@ class DepthSenseDataset(Dataset):
         return tensor
 
     def __getitem__(self, i: int) -> tuple[int, Tensor, Tensor, Tensor]:
-        return i, self._read_array(i, "frame"), self._read_array(i, "depth"), self._read_array(i, "normal")
+        return i, self._read_array(i, "frame"), self._read_array(
+            i,
+            "depth"), self._read_array(i, "normal")
 
     def __len__(self) -> int:
         return len(self.directories)
@@ -118,10 +114,10 @@ if __name__ == "__main__":
     lr: float = 1e-5
 
     # Data splitting.
-    dataset: Dataset = DepthSenseDataset(f"/data/{dataset_name}")
+    dataset: Dataset = DepthSenseDataset(f"data/{dataset_name}")
     data_size: int = len(dataset)
-    train_size: int = int(0.8 * data_size)
-    val_size: int = int(0.1 * data_size)
+    train_size: int = 1#int(0.8 * data_size)
+    val_size: int = 0#int(0.2 * data_size)
     test_size: int = len(dataset) - train_size - val_size
     train_set, val_set, test_set = data.random_split(dataset, [train_size, val_size, test_size])
     print(f"data_size: {data_size}, train_size: {train_size}, val_size: {val_size}, test_size: {test_size}")
@@ -135,7 +131,8 @@ if __name__ == "__main__":
     pretrained = torch.load('dinov2_vits14_pretrain.pth')
     model.pretrained.load_state_dict(pretrained)
     criterion: Module = Loss()
-    params = [{"params": model.parameters()}, {"params": [criterion.log_sigma_d, criterion.log_sigma_n]}]
+    params = [{"params": model.parameters()},
+              {"params": [criterion.log_sigma_d, criterion.log_sigma_n]}]
     optimizer: Optimizer = AdamW(params, lr, betas, eps, decay)
 
     checkpoint = None
@@ -161,7 +158,7 @@ if __name__ == "__main__":
         rnl: float = 0.0
         for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
             torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
+            #torch.cuda.reset_peak_memory_stats()
 
             # Move to appropriate device.
             x = x.to(device).permute(0, 3, 1, 2)
@@ -169,7 +166,11 @@ if __name__ == "__main__":
             z_gt = z_gt.to(device)
             z_gt = torch.nan_to_num(z_gt, nan=80.0, posinf=80.0, neginf=0.0)
             z_gt = torch.clamp(z_gt, min=0.0, max=80.0)
-            n_gt = n_gt.to(device).permute(0, 3, 1, 2) # (B, H, W, C) → (B, C, H, W)
+            n_gt = n_gt.to(device).permute(
+                0,
+                3,
+                1,
+                2)  # (B, H, W, C) → (B, C, H, W)
 
             # DEBUG: overtrain on single sample
             while True:
