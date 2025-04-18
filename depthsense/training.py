@@ -138,6 +138,9 @@ if __name__ == "__main__":
         features: int = 128
         lr: float = 1e-4
 
+        start_epoch = 0
+        start_step = 0
+
         # Model initialization.
         model_name: str = model_path.replace("{}", dataset_name)
         model: DepthSense = DepthSense(encoder, features).to(device).to(memory_format=torch.channels_last)
@@ -162,7 +165,7 @@ if __name__ == "__main__":
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     else:
         print(f"Fine tuning")
-        epochs: int = 30
+        epochs: int = 75  # this is on top of where we start
         batch_size: int = 64
         eps: float = 1e-8
         features: int = 128
@@ -171,11 +174,21 @@ if __name__ == "__main__":
         # Model initialization.
         model_name: str = model_path.replace("{}", dataset_name)
         model: DepthSense = DepthSense(encoder, features).to(device).to(memory_format=torch.channels_last)
-        pretrain = torch.load('vitg-fine-tune-base.pth')
-        model.load_state_dict(pretrain)
+
+        # Load from checkpoint
+        checkpoint = torch.load('prev-checkpoint.pt')
+        start_epoch = checkpoint['epoch'] + 1
+        start_step = 15050
+
+        model.load_state_dict(checkpoint['model_state_dict'])
+
+        # Uncomment below to start from fine-tune base
+        #pretrain = torch.load('vitg-fine-tune-base.pth')
+        #model.load_state_dict(pretrain)
         params = [{"params": model.parameters()},
                 {"params": [criterion.log_sigma_d, criterion.log_sigma_n]}]
         optimizer: Optimizer = AdamW(params, lr, betas, eps, decay)
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     # Training.
     model.train()
@@ -199,146 +212,138 @@ if __name__ == "__main__":
     )
     max_iters: int = len(train_loader)
 
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('./runs/experiment_03')
-    ) as prof:
+    t = start_step + 1
+    for e in range(start_epoch, start_epoch + epochs):
+        print(f"Epoch: {e}/{start_epoch + epochs}...")
+        model.train()
 
-        t = 0
-        for e in range(epochs):
-            print(f"Epoch: {e}/{epochs}...")
-            model.train()
+        rl: float = 0.0
+        rdl: float = 0.0
+        rnl: float = 0.0
+        for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
+            torch.cuda.empty_cache()
 
-            rl: float = 0.0
-            rdl: float = 0.0
-            rnl: float = 0.0
-            for i, (j, x, z_gt, n_gt) in enumerate(train_loader):
-                torch.cuda.empty_cache()
+            # Move to appropriate device.
+            x = x.to(device).permute(0, 3, 1, 2)
 
-                # Move to appropriate device.
-                x = x.to(device).permute(0, 3, 1, 2)
+            z_gt = z_gt.to(device)
+            z_gt = torch.nan_to_num(z_gt, nan=20.0, posinf=20.0, neginf=0.0)
+            z_gt = torch.clamp(z_gt, min=0.0, max=20.0)
+            n_gt = n_gt.to(device).permute(
+                0,
+                3,
+                1,
+                2)  # (B, H, W, C) → (B, C, H, W)
 
-                z_gt = z_gt.to(device)
-                z_gt = torch.nan_to_num(z_gt, nan=20.0, posinf=20.0, neginf=0.0)
-                z_gt = torch.clamp(z_gt, min=0.0, max=20.0)
-                n_gt = n_gt.to(device).permute(
-                    0,
-                    3,
-                    1,
-                    2)  # (B, H, W, C) → (B, C, H, W)
+            # Forward pass.
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                z_hat, n_hat = model(x)
+            depth_loss, norm_loss = criterion(z_hat, z_gt, n_hat, n_gt)
+            if torch.isnan(depth_loss).any() or torch.isnan(norm_loss).any():
+                print("Encountered nan in model output. Training will fail from here.")
+                breakpoint()
+                raise ValueError("nan in model output")
 
-                # Forward pass.
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                    z_hat, n_hat = model(x)
-                depth_loss, norm_loss = criterion(z_hat, z_gt, n_hat, n_gt)
-                if torch.isnan(depth_loss).any() or torch.isnan(norm_loss).any():
-                    print("Encountered nan in model output. Training will fail from here.")
-                    breakpoint()
-                    raise ValueError("nan in model output")
+            loss = depth_loss + norm_loss
+            # Backward pass.
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-                loss = depth_loss + norm_loss
-                # Backward pass.
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            # Statistics recollection and display.
+            rl += loss.item()
+            rnl += norm_loss.item()
+            rdl += depth_loss.item()
+            t += 1
+            if (i + 1) % 10 == 0 or i == 0:
+                avg_loss = rl / (10 if i > 0 else 1)
+                avg_n_loss = rnl / (10 if i > 0 else 1)
+                avg_d_loss = rdl / (10 if i > 0 else 1)
+                print(f"Epoch {e}, iter {i + 1}/{max_iters} — Loss: {avg_loss:.4f}, Loss Norm: {avg_n_loss:.4f}, Loss Depth: {avg_d_loss:.4f}")
+                writer.add_scalar("loss/normal", avg_n_loss, t)
+                writer.add_scalar("loss/depth", avg_d_loss, t)
+                writer.add_scalar("loss/total", avg_loss, t)
+                writer.add_scalar("param/log_sigma_d", criterion.log_sigma_d.item(), t)
+                writer.add_scalar("param/log_sigma_n", criterion.log_sigma_n.item(), t)
 
-                # Statistics recollection and display.
-                rl += loss.item()
-                rnl += norm_loss.item()
-                rdl += depth_loss.item()
-                t += 1
-                if (i + 1) % 10 == 0 or i == 0:
-                    avg_loss = rl / (10 if i > 0 else 1)
-                    avg_n_loss = rnl / (10 if i > 0 else 1)
-                    avg_d_loss = rdl / (10 if i > 0 else 1)
-                    print(f"Epoch {e}, iter {i + 1}/{max_iters} — Loss: {avg_loss:.4f}, Loss Norm: {avg_n_loss:.4f}, Loss Depth: {avg_d_loss:.4f}")
-                    writer.add_scalar("loss/normal", avg_n_loss, t)
-                    writer.add_scalar("loss/depth", avg_d_loss, t)
-                    writer.add_scalar("loss/total", avg_loss, t)
-                    writer.add_scalar("param/log_sigma_d", criterion.log_sigma_d.item(), t)
-                    writer.add_scalar("param/log_sigma_n", criterion.log_sigma_n.item(), t)
+                # reset running counters, don't aggregate over entire epoch
+                rl = 0.0
+                rnl = 0.0
+                rdl = 0.0
 
-                    # reset running counters, don't aggregate over entire epoch
-                    rl = 0.0
-                    rnl = 0.0
-                    rdl = 0.0
+            if (i + 1) % 50 == 0 or i == 0:
+                # render label and prediction
+                n_pred_vis = visualize_normals(n_hat[:4])
+                n_gt_vis = visualize_normals(n_gt[:4])
+                z_pred_vis = visualize_depth(z_hat[:4])
+                z_gt_vis = visualize_depth(z_gt[:4])
 
-                if (i + 1) % 50 == 0 or i == 0:
-                    # render label and prediction
-                    n_pred_vis = visualize_normals(n_hat[:4])
-                    n_gt_vis = visualize_normals(n_gt[:4])
-                    z_pred_vis = visualize_depth(z_hat[:4])
-                    z_gt_vis = visualize_depth(z_gt[:4])
+                n_pred_grid = torchvision.utils.make_grid(n_pred_vis)
+                n_gt_grid = torchvision.utils.make_grid(n_gt_vis)
+                z_pred_grid = torchvision.utils.make_grid(z_pred_vis)
+                z_gt_grid = torchvision.utils.make_grid(z_gt_vis)
 
-                    n_pred_grid = torchvision.utils.make_grid(n_pred_vis)
-                    n_gt_grid = torchvision.utils.make_grid(n_gt_vis)
-                    z_pred_grid = torchvision.utils.make_grid(z_pred_vis)
-                    z_gt_grid = torchvision.utils.make_grid(z_gt_vis)
+                writer.add_image("Normals/Prediction", n_pred_grid, t)
+                writer.add_image("Normals/GroundTruth", n_gt_grid, t)
+                writer.add_image("Depth/Prediction", z_pred_grid, t)
+                writer.add_image("Depth/GroundTruth", z_gt_grid, t)
 
-                    writer.add_image("Normals/Prediction", n_pred_grid, t)
-                    writer.add_image("Normals/GroundTruth", n_gt_grid, t)
-                    writer.add_image("Depth/Prediction", z_pred_grid, t)
-                    writer.add_image("Depth/GroundTruth", z_gt_grid, t)
+        model.eval()
+        val_rl = 0
+        val_rdl = 0
+        val_rnl = 0
+        with torch.no_grad():
+            count = 0
+            for j, (idx, x_val, z_gt_val, n_gt_val) in enumerate(val_loader):
+                count += 1
+                if count > 100:
+                    break
+                x_val = x_val.to(device).permute(0, 3, 1, 2)
+                z_gt_val = torch.nan_to_num(
+                    z_gt_val.to(device), nan=20.0, posinf=20.0, neginf=0.0
+                ).clamp(0, 20.0)
+                n_gt_val = n_gt_val.to(device).permute(0, 3, 1, 2)
 
-            model.eval()
-            val_rl = 0
-            val_rdl = 0
-            val_rnl = 0
-            with torch.no_grad():
-                count = 0
-                for j, (idx, x_val, z_gt_val, n_gt_val) in enumerate(val_loader):
-                    count += 1
-                    if count > 100:
-                        break
-                    x_val = x_val.to(device).permute(0, 3, 1, 2)
-                    z_gt_val = torch.nan_to_num(
-                        z_gt_val.to(device), nan=20.0, posinf=20.0, neginf=0.0
-                    ).clamp(0, 20.0)
-                    n_gt_val = n_gt_val.to(device).permute(0, 3, 1, 2)
+                z_hat_val, n_hat_val = model(x_val)
+                d_loss, n_loss = criterion(z_hat_val, z_gt_val, n_hat_val, n_gt_val)
+                total_val = d_loss + n_loss
+                val_rl += total_val.item()
+                val_rdl += d_loss.item()
+                val_rnl += n_loss.item()
 
-                    z_hat_val, n_hat_val = model(x_val)
-                    d_loss, n_loss = criterion(z_hat_val, z_gt_val, n_hat_val, n_gt_val)
-                    total_val = d_loss + n_loss
-                    val_rl += total_val.item()
-                    val_rdl += d_loss.item()
-                    val_rnl += n_loss.item()
+        num_batches = count
+        avg_val = val_rl / num_batches
+        avg_val_d = val_rdl / num_batches
+        avg_val_n = val_rnl / num_batches
+        print(
+            f"Validation — Loss: {avg_val:.4f}, Depth: {avg_val_d:.4f}, Norm: {avg_val_n:.4f}"
+        )
+        writer.add_scalar("val/total", avg_val, e)
+        writer.add_scalar("val/depth", avg_val_d, e)
+        writer.add_scalar("val/normal", avg_val_n, e)
 
-            num_batches = count
-            avg_val = val_rl / num_batches
-            avg_val_d = val_rdl / num_batches
-            avg_val_n = val_rnl / num_batches
-            print(
-                f"Validation — Loss: {avg_val:.4f}, Depth: {avg_val_d:.4f}, Norm: {avg_val_n:.4f}"
-            )
-            writer.add_scalar("val/total", avg_val, e)
-            writer.add_scalar("val/depth", avg_val_d, e)
-            writer.add_scalar("val/normal", avg_val_n, e)
+        # render the most recent
+        n_pred_vis = visualize_normals(n_hat_val[:4])
+        n_gt_vis = visualize_normals(n_gt_val[:4])
+        z_pred_vis = visualize_depth(z_hat_val[:4])
+        z_gt_vis = visualize_depth(z_gt_val[:4])
 
-            # render the most recent
-            n_pred_vis = visualize_normals(n_hat_val[:4])
-            n_gt_vis = visualize_normals(n_gt_val[:4])
-            z_pred_vis = visualize_depth(z_hat_val[:4])
-            z_gt_vis = visualize_depth(z_gt_val[:4])
+        n_pred_grid = torchvision.utils.make_grid(n_pred_vis)
+        n_gt_grid = torchvision.utils.make_grid(n_gt_vis)
+        z_pred_grid = torchvision.utils.make_grid(z_pred_vis)
+        z_gt_grid = torchvision.utils.make_grid(z_gt_vis)
 
-            n_pred_grid = torchvision.utils.make_grid(n_pred_vis)
-            n_gt_grid = torchvision.utils.make_grid(n_gt_vis)
-            z_pred_grid = torchvision.utils.make_grid(z_pred_vis)
-            z_gt_grid = torchvision.utils.make_grid(z_gt_vis)
+        writer.add_image("Validation Normals/Prediction", n_pred_grid, e)
+        writer.add_image("Validation Normals/GroundTruth", n_gt_grid, e)
+        writer.add_image("Validation Depth/Prediction", z_pred_grid, e)
+        writer.add_image("Validation Depth/GroundTruth", z_gt_grid, e)
 
-            writer.add_image("Validation Normals/Prediction", n_pred_grid, e)
-            writer.add_image("Validation Normals/GroundTruth", n_gt_grid, e)
-            writer.add_image("Validation Depth/Prediction", z_pred_grid, e)
-            writer.add_image("Validation Depth/GroundTruth", z_gt_grid, e)
-
-            print(f'Saving checkpoint for epoch {e}')
-            torch.save({
-                'epoch': e,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-            }, f'checkpoint_epoch_{e}.pt')
+        print(f'Saving checkpoint for epoch {e}')
+        torch.save({
+            'epoch': e,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+        }, f'checkpoint_epoch_{e}.pt')
 
     # Save current model.
     if PRETRAINING:
