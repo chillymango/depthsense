@@ -1,0 +1,28 @@
+{
+  "config": {
+    "encoder": "vitg",
+    "max_depth": 80.0,
+    "model": "depthsense",
+    "model_path": "checkpoints/checkpoint_epoch_124.pt",
+    "data_dir": "./data/hypersim",
+    "output_dir": "./output/hypersim",
+    "batch_size": 64,
+    "output_json": "benchmark_hypersim_depthsense_results.json"
+  },
+  "depth": {
+    "abs_rel": 2.920922040939331,
+    "sq_rel": 19.881677627563477,
+    "rmse": 6.848176956176758,
+    "rmse_log": 1.3660539388656616,
+    "a1": 0.0,
+    "a2": 0.0,
+    "a3": 0.0
+  },
+  "normals": {
+    "mean": 8.583858489990234,
+    "median": 4.552511692047119,
+    "<11.25": 0.7972546219825745,
+    "<22.5": 0.9063816070556641,
+    "<30": 0.9396258592605591
+  }
+}

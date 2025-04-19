@@ -1,0 +1,28 @@
+{
+  "config": {
+    "encoder": "vitl",
+    "max_depth": 80.0,
+    "model": "depthanythingv2",
+    "model_path": "checkpoints/depth_anything_v2_vitl.pth",
+    "data_dir": "./data/hypersim",
+    "output_dir": "./output/hypersim",
+    "batch_size": 64,
+    "output_json": "benchmark_hypersim_depthanythingv2_results.json"
+  },
+  "depth": {
+    "abs_rel": 31.935489654541016,
+    "sq_rel": 2473.71533203125,
+    "rmse": 75.29637145996094,
+    "rmse_log": 3.8876092433929443,
+    "a1": 0.00012147716188337654,
+    "a2": 0.00020246193162165582,
+    "a3": 0.00030369291198439896
+  },
+  "normals": {
+    "mean": 49.313724517822266,
+    "median": 36.09189987182617,
+    "<11.25": 0.04259799048304558,
+    "<22.5": 0.10511823743581772,
+    "<30": 0.2783649265766144
+  }
+}
