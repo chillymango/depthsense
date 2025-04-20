@@ -2,34 +2,24 @@
 This module contains logic for a model to generate pseudo-labels (ideally,
 the teacher network).
 """
+
 from argparse import ArgumentParser
 from argparse import Namespace
 from pathlib import Path
 
 import numpy as np
 import torch
+from dpt import DepthSense
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
-
-from dpt import DepthSense
 from util import common
-
-
-common.set_random_seeds()
-
-# Command-line arguments.
-parser: ArgumentParser = ArgumentParser()
-parser.add_argument("--batch_size", type=int, default=32)
-parser.add_argument("--dataset", type=str, default="hypersim")
-parser.add_argument("--features", type=int, default=128)
-parser.add_argument("--model", type=str, default="model-small.pth")
-parser.add_argument("--shuffle", type=bool, default=True)
-parser.add_argument("--size", type=int, nargs=2, default=(252, 196))
 
 
 class UnlabeledDataset(Dataset):
     """
     Wrapper for unlabeled data.
+
+    Loads images from a directory and resizes them to a specified size.
     """
 
     def __init__(self, root: Path, img_size: tuple[int, int]):
@@ -48,7 +38,12 @@ class UnlabeledDataset(Dataset):
         return len(self.files)
 
 
-def generate_labels():
+def generate_labels(args: Namespace):
+    """
+    Generates pseudo-labels for unlabeled data using a pre-trained model.
+
+    :param args: Command-line arguments, used to configure the model and data.
+    """
     # Parameters.
     args: Namespace = parser.parse_args()
     print("Arguments:", args)
@@ -96,4 +91,13 @@ def generate_labels():
 
 
 if __name__ == "__main__":
-    generate_labels()
+    common.set_random_seeds()
+    # Command-line arguments.
+    parser: ArgumentParser = ArgumentParser()
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--dataset", type=str, default="hypersim")
+    parser.add_argument("--features", type=int, default=128)
+    parser.add_argument("--model", type=str, default="model-small.pth")
+    parser.add_argument("--shuffle", type=bool, default=True)
+    parser.add_argument("--size", type=int, nargs=2, default=(252, 196))
+    generate_labels(parser.parse_args())

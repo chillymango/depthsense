@@ -4,7 +4,7 @@ CS7643 DL Final Project (2025-Spring)
 * [Final Report](https://www.overleaf.com/read/crtkktyccgcr#2d9638)
 
 ## Usage
-### Installation (Google Collab + Google Drive)
+### Installation (Google Colab + Google Drive)
 1. Clone this repository in Google Drive (Locally synced)
 ```
 git clone https://github.com/chillymango/depthsense.git

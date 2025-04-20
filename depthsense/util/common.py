@@ -34,8 +34,17 @@ def normalize_depths(depths: Tensor) -> Tensor:
     Normalizes `depths` to avoid numerical instabilities.
     """
     depths = torch.nan_to_num(depths, 20.0, 20.0, 0.0)
-    depths = torch.clamp(depths, 0.0, 20.0)
+    depths = torch.clip(depths, 0.0, 20.0)
     return depths
+
+
+def normalize_frame(frame: Tensor) -> Tensor:
+    """
+    Normalizes `frame` to avoid numerical instabilities.
+    """
+    frame = torch.nan_to_num(frame, 0.0, 1.0e4, 0.0)
+    frame = torch.clip(frame, 0.0, 1.0e4)
+    return frame / (1.0 + frame)
 
 
 def resize(img: np.ndarray, size: tuple[int, int]) -> np.ndarray:
