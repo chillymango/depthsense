@@ -18,6 +18,17 @@ git submodule update
 ```
 3. Check DEV environment by running ``depthanythingv2-test.ipynb``
 
+### Download DIODE dataset and run benchmark
+For our model, download https://drive.google.com/file/d/1yUFoY7kNWWhJRctwy4fWaszTndfdhVRU/view?usp=sharing to depthsense/checkpoints/
+```
+cd depthsense/data
+wget -qO- http://diode-dataset.s3.amazonaws.com/val.tar.gz | tar -xzv
+wget -qO- http://diode-dataset.s3.amazonaws.com/val_normals.tar.gz | tar -xzv
+
+cd ../
+./benchmark.sh # Adjust DATA_DIR and model
+```
+
 ## Project Structure
 ```
 depthsense/
