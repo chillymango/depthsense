@@ -42,9 +42,10 @@ class DIODE(Dataset):
 
             depth_file: Path = dir_path / f"{base_name}_depth.npy"
             normal_file: Path = dir_path / f"{base_name}_normal.npy"
+            mask_file: Path = dir_path / f"{base_name}_depth_mask.npy"
 
             if depth_file.exists() and normal_file.exists():
-                self.samples.append((image_file, depth_file, normal_file))
+                self.samples.append((image_file, depth_file, normal_file, mask_file))
             else:
                 print(f"Skipping: missing depth or normal file for {image_file}")
 
@@ -55,17 +56,18 @@ class DIODE(Dataset):
         num_samples = len(self.samples)
         preview_limit = min(3, num_samples)
         preview_lines = "\n".join(
-            f"  [{i}] img={img.name}, depth={depth.name}, normal={normal.name}"
-            for i, (img, depth, normal) in enumerate(self.samples[:preview_limit])
+            f"  [{i}] img={img.name}, depth={depth.name}, normal={normal.name}, mask={mask.name}"
+            for i, (img, depth, normal, mask) in enumerate(self.samples[:preview_limit])
         )
         return f"DIODE Dataset\nTotal samples: {num_samples}\nSample files:\n{preview_lines}"
 
-    def __getitem__(self, idx: int) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         img_path: Path
         depth_path: Path
         normal_path: Path
+        mask_path: Path
 
-        img_path, depth_path, normal_path = self.samples[idx]
+        img_path, depth_path, normal_path, mask_path = self.samples[idx]
 
         # --- Load and preprocess RGB image ---
         img: np.ndarray = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
@@ -90,7 +92,15 @@ class DIODE(Dataset):
         normal = cv2.resize(normal, (252, 196), interpolation=cv2.INTER_AREA)
         normal_tensor: torch.Tensor = torch.from_numpy(normal)  # (H, W, 3)
 
-        return idx, img_tensor, depth_tensor, normal_tensor
+        # --- Load and preprocess depth mask ---
+        mask: np.ndarray = np.load(mask_path).astype(np.bool_) if mask_path.exists() else None
+        if mask is not None:
+            mask = cv2.resize(mask.astype(np.uint8), (252, 196), interpolation=cv2.INTER_NEAREST)
+            mask_tensor = torch.from_numpy(mask.astype(bool))
+        else:
+            mask_tensor = torch.ones((196, 252), dtype=torch.bool)  # default valid everywhere
+
+        return idx, img_tensor, depth_tensor, normal_tensor, mask_tensor
 
 @torch.no_grad()
 def run_inference(model: torch.nn.Module, x: torch.Tensor, device: str, max_depth: float, model_type: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -119,7 +129,7 @@ def run_inference(model: torch.nn.Module, x: torch.Tensor, device: str, max_dept
     else:
         z_pred, n_pred = model(x)
 
-    z_pred = z_pred.clamp(min=1e-3, max=max_depth)
+    # z_pred = z_pred.clamp(min=1e-3, max=max_depth)
     n_pred = F.normalize(n_pred, p=2, dim=1)
 
     return z_pred, n_pred
@@ -169,10 +179,13 @@ def run_inference_batch(model: torch.nn.Module, dataloader: DataLoader, device: 
 
     # subdirectory 'model_type' under output_dir
     output_dir = output_dir / model_type
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for idx, (_i, frame, _depth, _normal) in enumerate(tqdm(dataloader, desc="Inferencing")):
+    # Create subdir for ground truth images
+    gt_dir = output_dir / "GT"
+    gt_dir.mkdir(parents=True, exist_ok=True)
+
+    for idx, (_i, frame, _depth, _normal, _mask) in enumerate(tqdm(dataloader, desc="Inferencing")):
         z_pred, n_pred = run_inference(model, frame, device, max_depth, model_type)
 
         if model_type == 'depthanythingv2':
@@ -202,9 +215,21 @@ def run_inference_batch(model: torch.nn.Module, dataloader: DataLoader, device: 
             normal_img = ((normal_np + 1) / 2 * 255).clip(0, 255).astype(np.uint8)
             frame_img = (frame_np * 255).clip(0, 255).astype(np.uint8)
 
+            # --- Save GT images ---
+            depth_gt_np = _depth[b].cpu().numpy()  # (H, W, 1) or (H, W)
+            if depth_gt_np.ndim == 3:
+                depth_gt_np = depth_gt_np[:, :, 0]
+            depth_gt_img = (255 * (depth_gt_np / max_depth)).clip(0, 255).astype(np.uint8)
+
+            normal_gt_np = _normal[b].cpu().numpy()  # (H, W, 3)
+            normal_gt_img = ((normal_gt_np + 1) / 2 * 255).clip(0, 255).astype(np.uint8)
+
+            cv2.imwrite(str(gt_dir / f"{index:06d}_depth_gt.png"), depth_gt_img)
+            cv2.imwrite(str(gt_dir / f"{index:06d}_normal_gt.png"), cv2.cvtColor(normal_gt_img, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(str(gt_dir / f"{index:06d}_frame.png"), cv2.cvtColor(frame_img, cv2.COLOR_RGB2BGR))
+
             cv2.imwrite(str(output_dir / f"{index:06d}_depth.png"), depth_img)
             cv2.imwrite(str(output_dir / f"{index:06d}_normal.png"), cv2.cvtColor(normal_img, cv2.COLOR_RGB2BGR))
-            cv2.imwrite(str(output_dir / f"{index:06d}_frame.png"), cv2.cvtColor(frame_img, cv2.COLOR_RGB2BGR))
 
 
 @torch.no_grad()
@@ -227,18 +252,30 @@ def evaluate(model: torch.nn.Module, dataloader: DataLoader, device: str, max_de
     depth_metrics: list[list[float]] = []
     normal_metrics: list[list[float]] = []
 
-    for _, frame, z_gt, n_gt in tqdm(dataloader, desc="Evaluating"):
+    for _, frame, z_gt, n_gt, mask in tqdm(dataloader, desc="Evaluating"):
         z_gt: torch.Tensor = z_gt.unsqueeze(1).to(device)
         n_gt: torch.Tensor = n_gt.permute(0, 3, 1, 2).to(device)
+        mask: torch.Tensor = mask.unsqueeze(1).to(device)
 
         z_pred, n_pred = run_inference(model, frame, device, max_depth, model_type)
 
+        # Expand z_pred to [B, 1, H, W] to match z_gt
+        if z_pred.ndim == 3:
+            z_pred = z_pred.unsqueeze(1)
+
+        valid_mask = mask& (z_gt > 1e-6)  # combine with numerical sanity
+        if valid_mask.sum() == 0:
+            continue
+
+        # print(f"z_gt={z_gt.shape}, n_gt={n_gt.shape}, z_pred={z_pred.shape}, n_pred={n_pred.shape}, mask={mask.shape}, valid_mask={valid_mask.shape}")
+
         # depth
-        abs_rel = torch.mean(torch.abs(z_pred - z_gt) / z_gt)
-        sq_rel = torch.mean((z_pred - z_gt) ** 2 / z_gt)
-        rmse = torch.sqrt(torch.mean((z_pred - z_gt) ** 2))
-        rmse_log = torch.sqrt(torch.mean((torch.log(z_pred + 1e-6) - torch.log(z_gt + 1e-6)) ** 2))
-        thresh = torch.max(z_gt / z_pred, z_pred / z_gt)
+        abs_rel = torch.sum(torch.abs(z_pred - z_gt)[valid_mask] / z_gt[valid_mask]) / valid_mask.sum()
+        sq_rel = torch.sum(((z_pred - z_gt) ** 2)[valid_mask] / z_gt[valid_mask]) / valid_mask.sum()
+        rmse = torch.sqrt(torch.mean((z_pred[valid_mask] - z_gt[valid_mask]) ** 2))
+        rmse_log = torch.sqrt(torch.mean((torch.log(z_pred[valid_mask] + 1e-6) - torch.log(z_gt[valid_mask] + 1e-6)) ** 2))
+
+        thresh = torch.max(z_gt[valid_mask] / z_pred[valid_mask], z_pred[valid_mask] / z_gt[valid_mask])
         a1 = (thresh < 1.25).float().mean()
         a2 = (thresh < 1.25 ** 2).float().mean()
         a3 = (thresh < 1.25 ** 3).float().mean()
@@ -325,8 +362,9 @@ def main():
             raise RuntimeError(f"Failed to initialize or load DepthSense model: {e}")
 
     elif args.model == 'depthanythingv2':
-        print(f"DepthAnythingV2 vitg not available... failling back to vitl")
-        args.encoder = 'vitl'
+        if args.encoder == 'vitg':
+            print(f"DepthAnythingV2 vitg not available... failling back to vitl")
+            args.encoder = 'vitl'
         try:
             model = DepthAnythingV2(
                 encoder='vitl',

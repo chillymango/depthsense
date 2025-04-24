@@ -30,7 +30,7 @@ fi
 
 ENCODER="vitl"
 # ============ [Modify Here] Configuration ===================
-MODEL="depthanythingv2" # 'depthsense' or 'depthanythingv2'
+MODEL="depthsense" # 'depthsense' or 'depthanythingv2'
 DEPTHSENSE_MODEL_NAME='checkpoint_epoch_7.pt' # update for depthsense
 
 DATASET_NAME='diode'
