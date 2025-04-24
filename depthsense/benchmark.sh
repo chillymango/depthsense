@@ -26,13 +26,13 @@ fi
 # ================================================================================================================================
 
 
-ENCODER="vitg"
+ENCODER="vitl"
 # ============ [Modify Here] Configuration ===================
 MODEL="depthsense" # 'depthsense' or 'depthanythingv2'
-DEPTHSENSE_MODEL_NAME='checkpoint_epoch_124.pt' # update for depthsense
+DEPTHSENSE_MODEL_NAME='checkpoint_epoch_7.pt' # update for depthsense
 
-DATASET_NAME='hypersim'
-DATA_DIR="./data/${DATASET_NAME}"
+DATASET_NAME='diode'
+DATA_DIR="/home/hice1/ylee904/scratch/depthsense/depthsense/data"
 OUTPUT_DIR="./output/${DATASET_NAME}"
 OUTPUT_JSON="benchmark_${DATASET_NAME}_${MODEL}_results.json"
 
