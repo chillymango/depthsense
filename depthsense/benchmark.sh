@@ -6,11 +6,13 @@ cd "$(dirname "$0")"
 MODEL_DIR="checkpoints"
 
 # ================================ This is to download DepthAnythingV2 pretrained model ========================================
-DEPTHANYTHING_MODEL_NAME="depth_anything_v2_vitl.pth"
+# DEPTHANYTHING_MODEL_NAME="depth_anything_v2_vitl.pth"
+DEPTHANYTHING_MODEL_NAME="depth_anything_v2_metric_hypersim_vitl.pth"
 DEPTHANYTHING_MODEL_PATH="${MODEL_DIR}/${DEPTHANYTHING_MODEL_NAME}"
 
 # Hugging Face model URL (with redirect support)
-URL="https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true"
+# URL="https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true"
+URL="https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Large/resolve/main/depth_anything_v2_metric_hypersim_vitl.pth?download=true"
 
 # Create destination directory if not exists
 mkdir -p "${MODEL_DIR}"
@@ -28,7 +30,7 @@ fi
 
 ENCODER="vitl"
 # ============ [Modify Here] Configuration ===================
-MODEL="depthsense" # 'depthsense' or 'depthanythingv2'
+MODEL="depthanythingv2" # 'depthsense' or 'depthanythingv2'
 DEPTHSENSE_MODEL_NAME='checkpoint_epoch_7.pt' # update for depthsense
 
 DATASET_NAME='diode'
@@ -36,7 +38,7 @@ DATA_DIR="/home/hice1/ylee904/scratch/depthsense/depthsense/data"
 OUTPUT_DIR="./output/${DATASET_NAME}"
 OUTPUT_JSON="benchmark_${DATASET_NAME}_${MODEL}_results.json"
 
-MAX_DEPTH=80.0
+MAX_DEPTH=20.0
 BATCH_SIZE=64
 # ============================================================
 
