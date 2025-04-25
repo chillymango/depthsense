@@ -1,0 +1,27 @@
+{
+  "config": {
+    "encoder": "vitl",
+    "max_depth": 20.0,
+    "model": "depthsense",
+    "model_path": "checkpoints/checkpoint_epoch_7.pt",
+    "data_dir": "/home/hice1/ylee904/scratch/depthsense/depthsense/data",
+    "output_dir": "./output/diode",
+    "output_json": "benchmark_diode_depthsense_results.json"
+  },
+  "depth": {
+    "abs_rel": 4.809951643943787,
+    "sq_rel": 61.55736105185289,
+    "rmse": 12.205355692643385,
+    "rmse_log": 1.6332258597704081,
+    "a1": 0.013452057432670979,
+    "a2": 0.0287478053302878,
+    "a3": 0.07607838675017635
+  },
+  "normals": {
+    "mean": 28.797234250582182,
+    "median": 21.996689620384803,
+    "<11.25": 0.2387588908084525,
+    "<22.5": 0.5482093708876233,
+    "<30": 0.6624943384069663
+  }
+}

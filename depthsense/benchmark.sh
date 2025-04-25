@@ -1,5 +1,5 @@
 #!/bin/bash
-# salloc -N1 -t0:60:00 --cpus-per-task 8 --ntasks-per-node=1 --gres=gpu:V100:1 --mem-per-gpu=8G
+# salloc -N1 -t0:30:00 --cpus-per-task 8 --ntasks-per-node=1 --gres=gpu:V100:1 --mem-per-gpu=8G
 
 cd "$(dirname "$0")"
 
@@ -38,8 +38,6 @@ DATA_DIR="/home/hice1/ylee904/scratch/depthsense/depthsense/data"
 OUTPUT_DIR="./output/${DATASET_NAME}"
 OUTPUT_JSON="benchmark_${DATASET_NAME}_${MODEL}_results.json"
 
-MAX_DEPTH=20.0
-BATCH_SIZE=64
 # ============================================================
 
 
@@ -59,8 +57,6 @@ CMD="python benchmark.py \
   --model-path $MODEL_PATH \
   --data-dir $DATA_DIR \
   --output-dir $OUTPUT_DIR \
-  --max-depth $MAX_DEPTH \
-  --batch-size $BATCH_SIZE \
   --output-json $OUTPUT_JSON"
 
 # Print and run

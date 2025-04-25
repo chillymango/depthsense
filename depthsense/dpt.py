@@ -71,14 +71,19 @@ class DepthSense(nn.Module):
 
     @torch.no_grad()
     def infer_image(self, raw_image, input_size=518):
-        # Preprocess image and predict depth + normals at original resolution
-        image, (h, w) = raw_image, raw_image.shape[2:]
-        depth, normals = self.forward(image)
+        image, (h, w) = self.image2tensor(raw_image, input_size)
 
-        depth = F.interpolate(depth[:, None], (h, w), mode="bilinear", align_corners=True)
-        normals = F.interpolate(normals, (h, w), mode="bilinear", align_corners=True)
+        depth, normal = self.forward(image)
 
-        return depth, normals
+        # Upsample to original resolution
+        depth = F.interpolate(depth[:, None], (h, w), mode="bilinear", align_corners=True)  # (1, 1, H, W)
+        normal = F.interpolate(normal, (h, w), mode="bilinear", align_corners=True)        # (1, 3, H, W)
+
+        # Remove batch/channel dims for output
+        depth_np = depth[0, 0].cpu().numpy()        # (H, W)
+        normal_np = normal[0].permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+
+        return depth_np, normal_np
 
     def image2tensor(self, raw_image, input_size=518):
         transform = Compose([
@@ -87,6 +92,7 @@ class DepthSense(nn.Module):
                 height=input_size,
                 resize_target=False,
                 keep_aspect_ratio=True,
+                ensure_multiple_of=14,
                 resize_method='lower_bound',
                 image_interpolation_method=cv2.INTER_CUBIC,
             ),

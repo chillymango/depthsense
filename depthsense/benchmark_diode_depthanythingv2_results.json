@@ -1,0 +1,27 @@
+{
+  "config": {
+    "encoder": "vitl",
+    "max_depth": 20.0,
+    "model": "depthanythingv2",
+    "model_path": "checkpoints/depth_anything_v2_metric_hypersim_vitl.pth",
+    "data_dir": "/home/hice1/ylee904/scratch/depthsense/depthsense/data",
+    "output_dir": "./output/diode",
+    "output_json": "benchmark_diode_depthanythingv2_results.json"
+  },
+  "depth": {
+    "abs_rel": 0.23669711993863948,
+    "sq_rel": 0.3835578064613331,
+    "rmse": 1.1390030405383844,
+    "rmse_log": 0.2965784983164989,
+    "a1": 0.5259001497392736,
+    "a2": 0.8334207148228262,
+    "a3": 0.9363580514666123
+  },
+  "normals": {
+    "mean": 43.78258021428035,
+    "median": 40.3321989947099,
+    "<11.25": 0.06060483311947722,
+    "<22.5": 0.22202323988113606,
+    "<30": 0.32478368391175394
+  }
+}

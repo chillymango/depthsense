@@ -165,3 +165,7 @@ cython_debug/
 #
 #
 depthsense/runs
+depthsense/checkpoints/
+depthsense/data/val/
+depthsense/output/
+depthsense/visualizations/

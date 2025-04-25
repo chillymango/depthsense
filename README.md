@@ -27,30 +27,46 @@ wget -qO- http://diode-dataset.s3.amazonaws.com/val_normals.tar.gz | tar -xzv
 
 cd ../
 ./benchmark.sh # Adjust DATA_DIR and model
+python gen_visual_comparison.py
 ```
 
 ## Project Structure
 ```
 depthsense/
-├── dinov2_layers/       # ViT model building blocks (unchanged from Depth-Anything-V2)
+├── benchmark_diode_depthanythingv2_results.json
+├── benchmark_diode_depthsense_results.json
+├── benchmark.py                                        # Benchmark scripts
+├── benchmark.sh
+├── checkpoints                                         # Pre-trained model/checkpoints
+│   ├── checkpoint_epoch_124.pt
+│   ├── checkpoint_epoch_7.pt
+│   ├── depth_anything_v2_metric_hypersim_vitl.pth
+│   ├── depth_anything_v2_vitl.pth
+│   └── dinov2_vitg14_pretrain.pth
+├── depthsense_head.py                                  # Dual-head decoder for depth and normals
+├── dinov2_layers                                       # ViT model building blocks (unchanged from Depth-Anything-V2)
 │   ├── attention.py
 │   ├── block.py
 │   ├── drop_path.py
+│   ├── __init__.py
 │   ├── layer_scale.py
 │   ├── mlp.py
 │   ├── patch_embed.py
-│   ├── swiglu_ffn.py
-│   └── __init__.py
-├── depthsense_head.py         # Dual-head decoder for depth and normals
-├── dinov2.py                  # DINOv2 backbone wrapper
-├── dpt.py                     # Contains the DepthSense model class
-├── generate_pseudo_labels.py  # Creates pseudo-labels for student model's training data
-├── geonet-code-map.py         # Explain how GeoNet's code.py is mapped to DepthSense
-├── training.py                # Configurable training script for teacher / student models
-├── util/
-│   ├── blocks.py              # Feature fusion utilities
-│   ├── loss.py                # Loss function
-│   └── transform.py           # Image preprocessing transforms
+│   └── swiglu_ffn.py
+├── dinov2.py                                           # DINOv2 backbone wrapper
+├── dpt.py                                              # Contains the DepthSense model class
+├── fetch_and_transform_hypersim.py                     # Preprocessing Hypersim dataset
+├── generate_pseudo_labels.py                           # Creates pseudo-labels for student model's training data
+├── gen_visual_comparison.py                            # Generate visual comparison (DepthAnythingV2 vs. Depthsense)
+├── student_training.py                                 # Student training script
+├── training.py                                         # Configurable training script for teacher / student models
+├── util
+│   ├── blocks.py                                       # Feature fusion utilities
+│   ├── common.py                                       # Common utilities
+│   ├── loss.py                                         # Loss function
+│   └── transform.py                                    # Image preprocessing transforms
+├── visualizations.zip
+└── visualize.ipynb
 ```
 
 ## LICENSE
