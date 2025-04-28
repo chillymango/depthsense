@@ -4,10 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.transforms import Compose
 
-from .dinov2 import DINOv2
-from .util.transform import Resize, NormalizeImage, PrepareForNet
-from .depthsense_head import DepthSenseHead
-from .refinement import depth_to_normal, normal_to_depth, EdgeRefinement, DepthRefinement, NormalRefinement
+from dinov2 import DINOv2
+from util.transform import Resize, NormalizeImage, PrepareForNet
+from depthsense_head import DepthSenseHead
+
 
 class DepthSense(nn.Module):
     """
@@ -22,7 +22,7 @@ class DepthSense(nn.Module):
         out_channels=[256, 512, 1024, 1024],
         use_bn=False,
         use_clstoken=False,
-        max_depth=20.0
+        max_depth=80.0
     ):
         super().__init__()
 
@@ -35,7 +35,7 @@ class DepthSense(nn.Module):
             'vits': [2, 5, 8, 11],
             'vitb': [2, 5, 8, 11],
             'vitl': [4, 11, 17, 23],
-            'vitg': [9, 19, 29, 39]
+            'vitg': [9, 19, 29, 39],
         }
 
         # DINOv2 ViT backbone
@@ -47,68 +47,43 @@ class DepthSense(nn.Module):
             features=features,
             use_bn=use_bn,
             out_channels=out_channels,
-            use_clstoken=use_clstoken
+            use_clstoken=use_clstoken,
         )
 
-        self.edge_refiner = EdgeRefinement()
-        self.depth_refiner = DepthRefinement(batch_size=1)
-        self.normal_refiner = NormalRefinement(batch_size=1)
-
-    def forward(self, x, intrinsics=None, grid=None, edge_refine=False):
+    def forward(self, x, edge_refine=False):
         # Compute patch size for reshaping ViT tokens into spatial maps
         patch_h, patch_w = x.shape[-2] // 14, x.shape[-1] // 14
-
         # Extract ViT features from selected layers
         features = self.pretrained.get_intermediate_layers(
             x,
             self.intermediate_layer_idx[self.encoder],
-            return_class_token=True
+            return_class_token=True,
         )
 
         # Predict raw depth and normal maps
         depth, normals = self.head(features, patch_h, patch_w)
         depth = depth.squeeze(1) * self.max_depth
-        normals = F.normalize(normals, p=2, dim=1)
 
-        if intrinsics is not None and grid is not None:
-            normals_from_d = depth_to_normal(depth.unsqueeze(1), intrinsics)
-            normals = F.normalize(normals + normals_from_d, dim=1)
-
-            depth_from_n = normal_to_depth(normals, intrinsics)
-
-            fc8_upsample_norm = normals.permute(0, 2, 3, 1)
-            fc8_upsample = depth.unsqueeze(-1)
-
-            depth = self.depth_refiner(
-                fc8_upsample=fc8_upsample,
-                fc8_upsample_norm=fc8_upsample_norm,
-                grid=grid,
-                inputs=x
-            ).squeeze(1) * self.max_depth
-
-            normals = self.normal_refiner(
-                fc8_upsample_norm=fc8_upsample_norm,
-                fc8_upsample=fc8_upsample,
-                grid=grid,
-                inputs=x
-            )
-
-        if edge_refine:
-            depth, normals = self.edge_refiner(x, depth.unsqueeze(1), normals)
-            depth = depth.squeeze(1)
+        norm = torch.norm(normals, dim=1, p=2, keepdim=True).clamp(min=1e-6)
+        normals = normals / norm
 
         return depth, normals
 
     @torch.no_grad()
     def infer_image(self, raw_image, input_size=518):
-        # Preprocess image and predict depth + normals at original resolution
         image, (h, w) = self.image2tensor(raw_image, input_size)
-        depth, normals = self.forward(image)
 
-        depth = F.interpolate(depth[:, None], (h, w), mode="bilinear", align_corners=True)[0, 0]
-        normals = F.interpolate(normals, (h, w), mode="bilinear", align_corners=True)[0]
+        depth, normal = self.forward(image)
 
-        return depth.cpu().numpy(), normals.cpu().numpy()
+        # Upsample to original resolution
+        depth = F.interpolate(depth[:, None], (h, w), mode="bilinear", align_corners=True)  # (1, 1, H, W)
+        normal = F.interpolate(normal, (h, w), mode="bilinear", align_corners=True)        # (1, 3, H, W)
+
+        # Remove batch/channel dims for output
+        depth_np = depth[0, 0].cpu().numpy()        # (H, W)
+        normal_np = normal[0].permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+
+        return depth_np, normal_np
 
     def image2tensor(self, raw_image, input_size=518):
         transform = Compose([

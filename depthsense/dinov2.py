@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.utils.checkpoint
 from torch.nn.init import trunc_normal_
 
-from .dinov2_layers import Mlp, PatchEmbed, SwiGLUFFNFused, MemEffAttention, NestedTensorBlock as Block
+from dinov2_layers import Mlp, PatchEmbed, SwiGLUFFNFused, MemEffAttention, NestedTensorBlock as Block
 
 
 logger = logging.getLogger("dinov2")
@@ -45,7 +45,7 @@ class DinoVisionTransformer(nn.Module):
     def __init__(
         self,
         img_size=224,
-        patch_size=16,
+        patch_size=14,
         in_chans=3,
         embed_dim=768,
         depth=12,
@@ -336,7 +336,7 @@ def init_weights_vit_timm(module: nn.Module, name: str = ""):
             nn.init.zeros_(module.bias)
 
 
-def vit_small(patch_size=16, num_register_tokens=0, **kwargs):
+def vit_small(patch_size=14, num_register_tokens=0, **kwargs):
     model = DinoVisionTransformer(
         patch_size=patch_size,
         embed_dim=384,
@@ -395,7 +395,7 @@ def vit_giant2(patch_size=16, num_register_tokens=0, **kwargs):
     return model
 
 
-def DINOv2(model_name):
+def DINOv2(model_name, **kwargs):
     model_zoo = {
         "vits": vit_small,
         "vitb": vit_base,
@@ -411,5 +411,6 @@ def DINOv2(model_name):
         block_chunks=0,
         num_register_tokens=0,
         interpolate_antialias=False,
-        interpolate_offset=0.1
+        interpolate_offset=0.1,
+        **kwargs,
     )

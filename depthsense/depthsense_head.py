@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .util.blocks import FeatureFusionBlock, _make_scratch
+from util.blocks import FeatureFusionBlock, _make_scratch
 
 def _make_fusion_block(features, use_bn, size=None):
     # Helper function to instantiate a FeatureFusionBlock
@@ -28,9 +28,9 @@ class DepthSenseHead(nn.Module):
         features=256,
         use_bn=False,
         out_channels=[256, 512, 1024, 1024],
-        use_clstoken=False
+        use_clstoken=False,
     ):
-        super(DepthSenseHead, self).__init__()
+        super().__init__()
 
         self.use_clstoken = use_clstoken
 
@@ -112,11 +112,20 @@ class DepthSenseHead(nn.Module):
         path_2 = self.scratch.refinenet2(path_3, layer_2_rn, size=layer_1_rn.shape[2:])
         path_1 = self.scratch.refinenet1(path_2, layer_1_rn)
 
-        # Upsample and decode predictions
-        depth = F.interpolate(path_1, scale_factor=14, mode="bilinear", align_corners=True)
-        depth = self.depth_head(depth)
+        # print(f"[DepthSenseHead.forward] path_1 shape: {path_1.shape}")
 
-        normals = F.interpolate(path_1, scale_factor=14, mode="bilinear", align_corners=True)
-        normals = self.normal_head(normals)
+        # Upsample and decode predictions
+        target_h = patch_h * 14
+        target_w = patch_w * 14
+
+        depth = self.depth_head(path_1)                      # shape: (B, 1, H/16, W/16)
+        # print(f"depth (pre-upsample) shape: {depth.shape}")
+        depth = F.interpolate(depth, size=(target_h, target_w), mode="bilinear", align_corners=True)
+        # print(f"depth (final) shape: {depth.shape}")
+
+        normals = self.normal_head(path_1)                   # shape: (B, 3, H/16, W/16)
+        # print(f"normals (pre-upsample) shape: {normals.shape}")
+        normals = F.interpolate(normals, size=(target_h, target_w), mode="bilinear", align_corners=True)
+        # print(f"normals (final) shape: {normals.shape}")
 
         return depth, normals
